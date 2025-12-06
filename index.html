@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FlashDeck v7</title>
+    <title>FlashDeck v8</title>
     <link rel="stylesheet" href="style.css">
     
     <script src="dexie.js"></script>
@@ -17,24 +17,26 @@
         
         <header>
             <div class="brand">
-                <h1>FlashDeck <span class="version">v7</span></h1>
+                <h1>FlashDeck</h1>
             </div>
-            <div class="header-controls">
-                <div class="stat-pill" title="Current Streak">🔥 <span id="stat-streak">0</span></div>
-                <div class="stat-pill" title="Level">⭐ <span id="stat-level">1</span></div>
-                <div class="currency-display" title="Sparks">⚡ <span id="credit-count">0</span></div>
+            <div class="header-stats">
+                <div class="xp-container">
+                    <span class="level-badge" id="header-level">Lvl 1</span>
+                    <div class="xp-bar-bg"><div class="xp-bar-fill" id="header-xp-bar" style="width:0%"></div></div>
+                </div>
+                <div class="stat-pill" title="Streak">🔥 <span id="header-streak">0</span></div>
+                <div class="currency-display" title="Sparks">⚡ <span id="header-sparks">0</span></div>
             </div>
         </header>
 
         <section id="view-home" class="active-view">
-            
             <div class="daily-stats-row">
                 <div class="mini-stat">
                     <span class="ms-label">Reviewed</span>
                     <span class="ms-val" id="daily-reviews">0</span>
                 </div>
                 <div class="mini-stat">
-                    <span class="ms-label">Learned</span>
+                    <span class="ms-label">New Cards</span>
                     <span class="ms-val" id="daily-learned">0</span>
                 </div>
                 <div class="mini-stat">
@@ -71,11 +73,12 @@
             <div class="nav-bar">
                 <h2>My Cards</h2>
                 <div class="nav-actions">
+                    <button id="btn-open-import" class="secondary-btn small-btn" style="margin-right:5px;">Import</button>
                     <button id="btn-add-card" class="fab-mini">+</button>
                 </div>
             </div>
             <div class="search-row">
-                <input type="text" id="search-bar" placeholder="Search cards by text...">
+                <input type="text" id="search-bar" placeholder="Search cards...">
             </div>
             <div id="card-list" class="scroll-list"></div>
         </section>
@@ -83,12 +86,17 @@
         <section id="view-settings" class="hidden-view">
             <h2>Settings</h2>
             <div class="settings-content">
-                <button id="btn-open-import" class="secondary-btn">Bulk Import Cards</button>
-                <button id="btn-backup" class="secondary-btn">Download Full Backup (.json)</button>
+                <button id="btn-backup" class="secondary-btn">Download Backup (.zip)</button>
+                
+                <label class="secondary-btn" style="display:block; text-align:center; margin-top:10px; cursor:pointer;">
+                    Restore Backup (.zip)
+                    <input type="file" id="file-restore" accept=".zip" hidden>
+                </label>
+
+                <hr>
                 <button id="btn-clear-db" class="danger-btn">Reset Database</button>
                 <div class="info-block">
-                    <p><strong>XP Progress:</strong> <span id="setting-xp">0</span> XP</p>
-                    <p class="small-text">Data stored locally in IndexedDB. Works offline.</p>
+                    <p class="small-text">Version 8.0. Local Storage Mode.</p>
                 </div>
             </div>
         </section>
@@ -100,57 +108,33 @@
             <button class="nav-item" data-target="view-settings">⚙️ Config</button>
         </nav>
 
-        <div id="modal-import" class="modal hidden">
-            <div class="modal-content">
-                <h3>Import Cards</h3>
-                <p class="small-text">Paste Excel/CSV. Added to <b>New Queue</b>.</p>
-                <p class="tiny-text">Format: <code>Target [TAB] Meta [TAB] Native</code></p>
-                <input type="text" id="input-bulk-tag" placeholder="Tag (e.g. French)">
-                <textarea id="input-bulk" placeholder="Paste data here..."></textarea>
-                <div class="modal-actions">
-                    <button id="btn-cancel-import" class="secondary-btn">Cancel</button>
-                    <button id="btn-run-import" class="primary-btn">Import Cards</button>
-                </div>
-            </div>
-        </div>
-
-        <div id="modal-import-chapter" class="modal hidden">
-            <div class="modal-content">
-                <h3>Import Chapter</h3>
-                <p class="small-text">Creates a chapter with segments.</p>
-                <input type="text" id="imp-chap-title" placeholder="Title (e.g. Harry Potter Ch1)">
-                <input type="text" id="imp-chap-tag" placeholder="Language Tag">
-                <textarea id="imp-chap-data" placeholder="Paste text here..." style="height:150px;"></textarea>
-                <div class="modal-actions">
-                    <button id="btn-cancel-imp-chap" class="secondary-btn">Cancel</button>
-                    <button id="btn-run-imp-chap" class="primary-btn">Import Chapter</button>
-                </div>
-            </div>
-        </div>
-
         <div id="overlay-study" class="overlay hidden">
             <div class="overlay-header">
                 <button id="btn-quit-study" class="text-btn">Quit</button>
                 <span id="study-mode-badge" class="tag">Review</span>
                 <span id="study-progress">1 / 10</span>
             </div>
-            <div class="card-area">
+            
+            <div class="card-area" id="study-click-target">
                 <div id="study-tag-badge" class="tag-badge hidden">TAG</div>
+                
                 <div id="study-question">
                     <span class="hint-text" id="study-hint-label">...</span>
                     <h3 id="study-main-text">...</h3>
-                    <button id="btn-play-audio" class="audio-btn">🔊</button>
                     <button id="btn-show-hint" class="text-btn hidden">Show Hint</button>
                     <p id="study-sub-text" class="hidden">...</p>
                 </div>
+
                 <div id="study-cloze-area" class="hidden">
                     <input type="text" id="cloze-answer" placeholder="Type answer..." autocomplete="off">
                     <button id="btn-check-cloze" class="secondary-btn">Check</button>
                 </div>
+
                 <div id="study-answer" class="hidden">
                     <div class="divider"></div>
                     <div class="answer-box">
                         <h3 id="ans-target">...</h3>
+                        <button id="btn-play-audio" class="audio-btn-small">🔊</button>
                         <p id="ans-meta" class="meta-text">...</p>
                         <p id="ans-native">...</p>
                     </div>
@@ -167,7 +151,7 @@
         <div id="overlay-builder" class="overlay hidden">
             <div class="overlay-header">
                 <button id="btn-quit-builder" class="text-btn">Cancel</button>
-                <span>New Chapter</span>
+                <span id="builder-header-title">New Chapter</span>
                 <button id="btn-save-chapter" class="primary-btn small-btn">Save</button>
             </div>
             <div class="builder-meta">
@@ -207,7 +191,9 @@
             <div id="reader-controls" style="padding:10px; border-top:1px solid #eee; display:flex; gap:10px;">
                 <button id="btn-reader-play" class="primary-btn">🔊 Play All</button>
             </div>
+            
             <div id="reader-sheet" class="bottom-sheet hidden">
+                <button id="btn-close-sheet" class="sheet-close-btn">✖</button>
                 <div class="sheet-content">
                     <h3 id="sheet-target">Target</h3>
                     <p id="sheet-native">Native</p>
@@ -239,7 +225,7 @@
 
         <div id="modal-add-card" class="modal hidden">
             <div class="modal-content">
-                <h3>Card Details</h3>
+                <h3 id="modal-card-title">Card Details</h3>
                 <form id="form-quick-add">
                     <input type="text" id="qa-tag" placeholder="Tag (e.g. Mandarin)">
                     <textarea id="qa-target" placeholder="Target" required></textarea>
@@ -262,6 +248,33 @@
             </div>
         </div>
 
+        <div id="modal-import" class="modal hidden">
+            <div class="modal-content">
+                <h3>Import Cards</h3>
+                <p class="small-text">Paste Excel/CSV. Added to <b>New Queue</b>.</p>
+                <p class="tiny-text">Format: <code>Target [TAB] Meta [TAB] Native</code></p>
+                <input type="text" id="input-bulk-tag" placeholder="Tag (e.g. French)">
+                <textarea id="input-bulk" placeholder="Paste data here..."></textarea>
+                <div class="modal-actions">
+                    <button id="btn-cancel-import" class="secondary-btn">Cancel</button>
+                    <button id="btn-run-import" class="primary-btn">Import Cards</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="modal-import-chapter" class="modal hidden">
+            <div class="modal-content">
+                <h3>Import Chapter</h3>
+                <input type="text" id="imp-chap-title" placeholder="Title">
+                <input type="text" id="imp-chap-tag" placeholder="Language Tag">
+                <textarea id="imp-chap-data" placeholder="Paste text here..." style="height:150px;"></textarea>
+                <div class="modal-actions">
+                    <button id="btn-cancel-imp-chap" class="secondary-btn">Cancel</button>
+                    <button id="btn-run-imp-chap" class="primary-btn">Import</button>
+                </div>
+            </div>
+        </div>
+        
         <div id="modal-cram-settings" class="modal hidden">
             <div class="modal-content">
                 <h3>Cram Mode</h3>
@@ -269,11 +282,6 @@
                 <select id="cram-tag-select" style="width:100%; padding:10px; margin:10px 0;">
                     <option value="ALL">All Tags</option>
                 </select>
-                <div class="toggle-container" style="margin-bottom:20px;">
-                    <button id="cram-type-mix" class="toggle-btn active">Mix</button>
-                    <button id="cram-type-vocab" class="toggle-btn">Words</button>
-                    <button id="cram-type-sentence" class="toggle-btn">Sentences</button>
-                </div>
                 <div class="modal-actions">
                     <button id="btn-cancel-cram" class="secondary-btn">Cancel</button>
                     <button id="btn-start-cram" class="primary-btn cram-btn">Start</button>
