@@ -1,726 +1,674 @@
-// --- STATE MANAGEMENT ---
-let cards = JSON.parse(localStorage.getItem('flashdeck_v3_cards')) || [];
-let userCredits = parseInt(localStorage.getItem('flashdeck_v3_credits')) || 100;
-let lastLogin = localStorage.getItem('flashdeck_v3_login');
+// ==========================================
+// 1. DATABASE SERVICE (IndexedDB via Dexie)
+// ==========================================
+const db = new Dexie('FlashDeckDB_v6');
+db.version(1).stores({
+    cards: '++id, type, tag, status, dueDate', // status: NEW, ACTIVE, LEECH
+    chapters: '++id, title, tag',
+    audio: '++id, cardId, segmentId' // Stores binary blobs
+});
 
-// Runtime State
-let reviewQueue = [];
-let currentCard = null;
-let editingId = null; 
-let isCramSession = false;
-let cramConfig = { tag: 'ALL', type: 'MIX' }; // Stores cram filter choices
+// ==========================================
+// 2. AUDIO SERVICE
+// ==========================================
+const AudioService = {
+    recorder: null,
+    chunks: [],
+    
+    async startRecording() {
+        if (!navigator.mediaDevices) return alert("Microphone not supported/allowed.");
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this.recorder = new MediaRecorder(stream);
+            this.chunks = [];
+            this.recorder.ondataavailable = e => this.chunks.push(e.data);
+            this.recorder.start();
+            return true;
+        } catch (e) {
+            console.error(e);
+            alert("Mic Error. Use HTTPS or Localhost.");
+            return false;
+        }
+    },
 
-// Game State
-let gameQueue = [];
-let gameRound = 1;
-let gameSpeed = 3000;
-let gameTimer = null;
-let gamePhase = 'WATCH';
-let gameIndex = 0;
-let gameScore = 0;
+    stopRecording() {
+        return new Promise(resolve => {
+            if (!this.recorder) return resolve(null);
+            this.recorder.onstop = () => {
+                const blob = new Blob(this.chunks, { type: 'audio/webm' });
+                resolve(blob);
+            };
+            this.recorder.stop();
+        });
+    },
 
-// --- DOM ELEMENTS ---
-const views = {
-    dashboard: document.getElementById('view-dashboard'),
-    add: document.getElementById('view-add'),
-    review: document.getElementById('view-review'),
-    game: document.getElementById('view-game'),
-    settings: document.getElementById('view-settings')
+    // Handle File Upload from <input type="file">
+    handleFileUpload(fileInput) {
+        return new Promise(resolve => {
+            const file = fileInput.files[0];
+            if (!file) return resolve(null);
+            resolve(file); // File object is a Blob
+        });
+    },
+
+    async play(blobOrText) {
+        if (blobOrText instanceof Blob) {
+            const url = URL.createObjectURL(blobOrText);
+            const audio = new Audio(url);
+            audio.play();
+        } else if (typeof blobOrText === 'string') {
+            const u = new SpeechSynthesisUtterance(blobOrText);
+            u.lang = Logic.isCJK(blobOrText) ? 'zh-CN' : 'en-US';
+            window.speechSynthesis.speak(u);
+        }
+    },
+
+    async saveAudio(blob, cardId=null, segmentId=null) {
+        if (!blob) return;
+        await db.audio.add({ blob, cardId, segmentId });
+    },
+
+    async getAudioForCard(cardId) {
+        const record = await db.audio.where('cardId').equals(cardId).first();
+        return record ? record.blob : null;
+    }
 };
 
-function init() {
-    checkDailyBonus();
-    updateDashboard();
-    setupEventListeners();
-    refreshTagList();
-}
+// ==========================================
+// 3. LOGIC SERVICE
+// ==========================================
+const Logic = {
+    userCredits: parseInt(localStorage.getItem('fd6_credits')) || 100,
 
-// --- CURRENCY LOGIC ---
-function checkDailyBonus() {
-    const today = new Date().toDateString();
-    if (lastLogin !== today) {
-        userCredits += 50; 
-        alert("Daily Bonus! +50 ⚡");
-        localStorage.setItem('flashdeck_v3_login', today);
-        saveCredits();
-    }
-}
+    isCJK(text) {
+        return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/.test(text);
+    },
 
-function saveCredits() {
-    localStorage.setItem('flashdeck_v3_credits', userCredits);
-    document.getElementById('credit-count').textContent = userCredits;
-    updateDashboardButtons();
-}
+    addCredits(amount) {
+        this.userCredits += amount;
+        localStorage.setItem('fd6_credits', this.userCredits);
+        UI.updateCredits();
+    },
 
-function updateDashboardButtons() {
-    const btn = document.getElementById('btn-action-main');
-    const isCram = btn.classList.contains('cram-btn');
-    
-    if (isCram) {
-        if (userCredits < 50) {
-            btn.disabled = true;
-            btn.innerHTML = `Configure Cram (50 ⚡)<br><small>Not enough sparks</small>`;
+    calculateNextReview(card, rating) {
+        let nextInterval = 0;
+        let newLapses = card.lapses || 0;
+        let lockedIndex = card.lockedIndex; // Sticky Cloze logic
+
+        if (rating === 0) {
+            nextInterval = 0; // Due today
+            newLapses++;
         } else {
-            btn.disabled = false;
-            btn.innerHTML = `Configure Cram <span class="cost-tag">-50 ⚡</span>`;
-        }
-    }
-}
-
-// --- HELPER: CJK DETECTION ---
-function isCJK(text) {
-    return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/.test(text);
-}
-
-// --- HELPER: FISHER-YATES SHUFFLE ---
-function shuffle(array) {
-    let currentIndex = array.length, randomIndex;
-    while (currentIndex !== 0) {
-        randomIndex = Math.floor(Math.random() * currentIndex);
-        currentIndex--;
-        [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
-    }
-    return array;
-}
-
-// --- DASHBOARD & LIST ---
-function updateDashboard() {
-    const now = Date.now();
-    const due = cards.filter(c => c.dueDate <= now);
-    const box = document.querySelector('.stats-box');
-    const btn = document.getElementById('btn-action-main');
-    const heading = document.getElementById('status-heading');
-
-    document.getElementById('credit-count').textContent = userCredits;
-
-    if (due.length > 0) {
-        // SRS Mode (Unified)
-        box.classList.remove('cram-mode');
-        heading.textContent = "Due Today";
-        document.getElementById('due-count').textContent = due.length;
-        btn.textContent = `Review Now (${due.length})`;
-        btn.classList.remove('cram-btn');
-        btn.disabled = false;
-        btn.onclick = startSRSReview;
-    } else {
-        // Cram Mode (Requires Config)
-        box.classList.add('cram-mode');
-        heading.textContent = "All Caught Up!";
-        document.getElementById('due-count').textContent = "0";
-        btn.classList.add('cram-btn');
-        btn.onclick = openCramModal; // Opens the config modal
-    }
-    
-    updateDashboardButtons();
-
-    document.getElementById('total-count').textContent = `${cards.length} cards`;
-
-    // Render List
-    const list = document.getElementById('card-list');
-    list.innerHTML = '';
-    cards.forEach(card => {
-        const div = document.createElement('div');
-        div.className = 'card-item';
-        const isChinese = isCJK(card.target);
-        div.innerHTML = `
-            <div class="card-text">
-                <div>
-                    ${card.tag ? `<span class="tag">${card.tag}</span>` : ''}
-                    <span style="font-weight:bold; font-size: ${isChinese ? '1.1rem' : '1rem'}">${card.target.substring(0, 20)}</span>
-                </div>
-                ${card.meta ? `<span class="meta-text">${card.meta}</span>` : ''}
-                <span style="color:#666; font-size:0.8rem;">${card.native.substring(0, 20)}</span>
-            </div>
-            <div class="card-actions">
-                <button class="action-btn" onclick="editCard(${card.id})">✎</button>
-                <button class="action-btn" onclick="deleteCard(${card.id})">🗑</button>
-            </div>
-        `;
-        list.appendChild(div);
-    });
-    
-    refreshTagList();
-}
-
-function refreshTagList() {
-    const uniqueTags = [...new Set(cards.map(c => c.tag).filter(t => t))];
-    const datalist = document.getElementById('tag-list');
-    datalist.innerHTML = '';
-    uniqueTags.forEach(tag => {
-        const opt = document.createElement('option');
-        opt.value = tag;
-        datalist.appendChild(opt);
-    });
-
-    // Populate Cram Select
-    const select = document.getElementById('cram-tag-select');
-    // Keep "All Tags"
-    select.innerHTML = '<option value="ALL">All Tags</option>'; 
-    uniqueTags.forEach(tag => {
-        const opt = document.createElement('option');
-        opt.value = tag;
-        opt.textContent = tag;
-        select.appendChild(opt);
-    });
-}
-
-// --- NAVIGATION ---
-function showView(viewName) {
-    Object.values(views).forEach(el => {
-        el.classList.remove('active-view');
-        el.classList.add('hidden-view');
-    });
-    views[viewName].classList.remove('hidden-view');
-    views[viewName].classList.add('active-view');
-    if(viewName === 'dashboard') updateDashboard();
-}
-
-// --- ADD / EDIT / IMPORT ---
-let addType = 'VOCAB';
-
-function updateInputLabels() {
-    const targetVal = document.getElementById('input-target').value;
-    const metaLabel = document.getElementById('label-meta');
-    if (isCJK(targetVal)) {
-        metaLabel.textContent = "Pinyin / Reading (Recommended)";
-    } else {
-        metaLabel.textContent = "Notes / Gender (Optional)";
-    }
-}
-
-function saveCard(e) {
-    e.preventDefault();
-    const target = document.getElementById('input-target').value;
-    const meta = document.getElementById('input-meta').value;
-    const native = document.getElementById('input-native').value;
-    const tag = document.getElementById('input-tag').value.trim();
-
-    const payload = {
-        id: editingId || Date.now(),
-        type: addType,
-        target: target,
-        meta: meta,
-        native: native,
-        tag: tag,
-        dueDate: editingId ? (cards.find(c=>c.id === editingId).dueDate) : Date.now(),
-        interval: editingId ? (cards.find(c=>c.id === editingId).interval) : 0,
-        factor: editingId ? (cards.find(c=>c.id === editingId).factor) : 2.5
-    };
-
-    if (editingId) {
-        const index = cards.findIndex(c => c.id === editingId);
-        if (index > -1) cards[index] = payload;
-        editingId = null;
-        document.getElementById('add-title').textContent = "New Card";
-    } else {
-        cards.push(payload);
-    }
-    saveData();
-    document.getElementById('add-form').reset();
-    showView('dashboard');
-}
-
-function runBulkImport() {
-    const raw = document.getElementById('input-bulk').value;
-    const bulkTag = document.getElementById('input-bulk-tag').value.trim();
-    if (!raw.trim()) return;
-
-    const lines = raw.split('\n');
-    let count = 0;
-    const useTab = raw.indexOf('\t') !== -1;
-    const delimiter = useTab ? '\t' : ',';
-
-    lines.forEach(line => {
-        if (!line.trim()) return;
-        let parts = line.split(delimiter).map(s => s.trim());
-        if (parts.length < 2) return;
-        if (parts[0].toLowerCase() === 'target' || parts[0].toLowerCase() === 'front') return;
-
-        let target, meta, native;
-        if (parts.length === 2) {
-            target = parts[0]; native = parts[1]; meta = "";
-        } else {
-            target = parts[0]; meta = parts[1]; native = parts[2];
+            const mult = [0, 1.2, 2.5, 4.0];
+            const currentInt = card.interval || 0;
+            nextInterval = Math.ceil(Math.max(1, currentInt * mult[rating]));
+            lockedIndex = null; // Clear lock on success
         }
 
-        // SMART TYPE DETECTION
-        let type = 'VOCAB';
-        if (isCJK(target)) {
-            // If punctuation found, assume sentence
-            if (/[。？！，,?!]/.test(target)) type = 'SENTENCE';
-        } else {
-            // If > 3 words, assume sentence
-            if (target.split(' ').length > 3) type = 'SENTENCE';
-        }
-
-        cards.push({
-            id: Date.now() + Math.random(),
-            type: type, 
-            target: target,
-            meta: meta,
-            native: native,
-            tag: bulkTag, // Apply the bulk tag
-            dueDate: Date.now(),
-            interval: 0,
-            factor: 2.5
-        });
-        count++;
-    });
-
-    saveData();
-    document.getElementById('input-bulk').value = "";
-    document.getElementById('modal-import').classList.add('hidden');
-    alert(`Imported ${count} cards!`);
-    showView('dashboard');
-}
-
-function editCard(id) {
-    const card = cards.find(c => c.id === id);
-    if(!card) return;
-    editingId = id; 
-    document.getElementById('input-target').value = card.target;
-    document.getElementById('input-meta').value = card.meta;
-    document.getElementById('input-native').value = card.native;
-    document.getElementById('input-tag').value = card.tag || "";
-    updateInputLabels();
-    if(card.type === 'VOCAB') document.getElementById('type-vocab').click();
-    else document.getElementById('type-sentence').click();
-    document.getElementById('add-title').textContent = "Edit Card";
-    showView('add');
-}
-
-function deleteCard(id) {
-    if(confirm("Delete this card?")) {
-        cards = cards.filter(c => c.id !== id);
-        saveData();
-    }
-}
-
-function saveData() {
-    localStorage.setItem('flashdeck_v3_cards', JSON.stringify(cards));
-    updateDashboard();
-}
-
-// --- CRAM MODAL LOGIC ---
-function openCramModal() {
-    document.getElementById('modal-cram-settings').classList.remove('hidden');
-}
-
-function runCramSession() {
-    if(userCredits < 50) return alert("Not enough sparks!");
-    
-    // 1. Get Filters
-    const tagFilter = document.getElementById('cram-tag-select').value;
-    const typeBtn = document.querySelector('#modal-cram-settings .toggle-btn.active').id;
-    let typeFilter = 'MIX';
-    if (typeBtn.includes('vocab')) typeFilter = 'VOCAB';
-    if (typeBtn.includes('sentence')) typeFilter = 'SENTENCE';
-
-    // 2. Filter Pool
-    let pool = cards;
-    if (tagFilter !== 'ALL') pool = pool.filter(c => c.tag === tagFilter);
-    if (typeFilter !== 'MIX') pool = pool.filter(c => c.type === typeFilter);
-
-    if (pool.length === 0) return alert("No cards match filters!");
-
-    // 3. Spend & Start
-    userCredits -= 50;
-    saveCredits();
-    document.getElementById('modal-cram-settings').classList.add('hidden');
-
-    isCramSession = true;
-    reviewQueue = shuffle([...pool]).slice(0, 10);
-    document.getElementById('mode-indicator').textContent = "Cram Mode";
-    document.getElementById('mode-indicator').style.background = "#e17055";
-    showView('review');
-    loadNextReviewCard();
-}
-
-// --- REVIEW ENGINE ---
-function startSRSReview() {
-    isCramSession = false;
-    const now = Date.now();
-    reviewQueue = cards.filter(c => c.dueDate <= now);
-    document.getElementById('mode-indicator').textContent = "SRS Review";
-    document.getElementById('mode-indicator').style.background = "#4a90e2";
-    showView('review');
-    loadNextReviewCard();
-}
-
-function loadNextReviewCard() {
-    if(reviewQueue.length === 0) {
-        alert(isCramSession ? "Cram Complete!" : "Reviews Complete!");
-        showView('dashboard');
-        return;
-    }
-    currentCard = reviewQueue[0];
-    
-    // UI Reset
-    document.getElementById('card-answer').classList.add('hidden');
-    document.getElementById('cloze-input-area').classList.add('hidden');
-    document.getElementById('cloze-answer').value = '';
-    document.getElementById('cloze-answer').className = '';
-    document.getElementById('review-sub-text').classList.add('hidden');
-    document.getElementById('btn-show-hint').classList.add('hidden');
-    document.getElementById('progress-text').textContent = `${reviewQueue.length} left`;
-
-    // Show Tag Badge
-    const badge = document.getElementById('review-tag-badge');
-    if (currentCard.tag) {
-        badge.textContent = currentCard.tag;
-        badge.classList.remove('hidden');
-    } else {
-        badge.classList.add('hidden');
-    }
-
-    if (currentCard.type === 'SENTENCE') {
-        renderClozeCard();
-    } else {
-        if (Math.random() > 0.3) renderVocabRecognition();
-        else renderVocabRecall();
-    }
-}
-
-function renderVocabRecognition() {
-    document.getElementById('review-hint-label').textContent = "Translate to Native:";
-    document.getElementById('review-main-text').textContent = currentCard.target;
-    setupAnswerDisplay();
-}
-
-function renderVocabRecall() {
-    document.getElementById('review-hint-label').textContent = "Translate to Target:";
-    document.getElementById('review-main-text').textContent = currentCard.native;
-    if (currentCard.meta) {
-        const btn = document.getElementById('btn-show-hint');
-        btn.classList.remove('hidden');
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            document.getElementById('review-sub-text').textContent = currentCard.meta;
-            document.getElementById('review-sub-text').classList.remove('hidden');
-            btn.classList.add('hidden');
+        return {
+            interval: nextInterval,
+            dueDate: Date.now() + (nextInterval * 24 * 60 * 60 * 1000),
+            lapses: newLapses,
+            status: newLapses >= 5 ? 'LEECH' : 'ACTIVE',
+            lockedIndex
         };
     }
-    setupAnswerDisplay();
-}
+};
 
-function setupAnswerDisplay() {
-    document.getElementById('review-answer-target').textContent = currentCard.target;
-    document.getElementById('review-answer-meta').textContent = currentCard.meta || "";
-    document.getElementById('review-answer-native').textContent = currentCard.native;
-    document.getElementById('card-question').onclick = revealAnswer;
-    document.getElementById('card-question').style.cursor = 'pointer';
-}
+// ==========================================
+// 4. UI CONTROLLER
+// ==========================================
+const UI = {
+    showTab(tabId) {
+        document.querySelectorAll('section').forEach(el => el.classList.remove('active-view'));
+        document.querySelectorAll('section').forEach(el => el.classList.add('hidden-view'));
+        document.getElementById(tabId).classList.remove('hidden-view');
+        document.getElementById(tabId).classList.add('active-view');
+        
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        document.querySelector(`.nav-item[data-target="${tabId}"]`).classList.add('active');
 
-function renderClozeCard() {
-    document.getElementById('review-hint-label').textContent = currentCard.native; 
-    document.getElementById('card-question').onclick = null; 
-    document.getElementById('card-question').style.cursor = 'default';
-
-    const isChinese = isCJK(currentCard.target);
-    let words = [], candidates = [];
-
-    if (isChinese) {
-        words = currentCard.target.split(''); 
-        candidates = words.map((w, i) => ({word: w, index: i})).filter(item => !/[ ，。？！?!\.,]/.test(item.word));
-    } else {
-        words = currentCard.target.split(' ');
-        candidates = words.map((w, i) => ({word: w, index: i})).filter(item => item.word.length > 2);
+        if (tabId === 'view-home') Dashboard.refresh();
+        if (tabId === 'view-read') Library.refresh();
+        if (tabId === 'view-browse') Deck.refresh();
+    },
+    updateCredits() { document.getElementById('credit-count').textContent = Logic.userCredits; },
+    toggleOverlay(id, show) {
+        const el = document.getElementById(id);
+        if (show) el.classList.remove('hidden');
+        else el.classList.add('hidden');
     }
+};
 
-    if(candidates.length === 0) { renderVocabRecognition(); return; }
+// ==========================================
+// 5. MODULE: DASHBOARD
+// ==========================================
+const Dashboard = {
+    async refresh() {
+        const now = Date.now();
+        const dueCount = await db.cards.where('dueDate').belowOrEqual(now).count();
+        const newCount = await db.cards.where('status').equals('NEW').count();
+        
+        const box = document.querySelector('.stats-box');
+        const btn = document.getElementById('btn-action-main');
+        const count = document.getElementById('dashboard-count');
+        const heading = document.getElementById('status-heading');
 
-    const selected = candidates[Math.floor(Math.random() * candidates.length)];
-    window.clozeAnswer = selected.word;
-    
-    const displayWords = [...words];
-    displayWords[selected.index] = "___";
-    
-    const joiner = isChinese ? '' : ' ';
-    document.getElementById('review-main-text').textContent = displayWords.join(joiner);
-    
-    document.getElementById('review-answer-target').textContent = currentCard.target;
-    document.getElementById('review-answer-meta').textContent = currentCard.meta;
-    document.getElementById('review-answer-native').textContent = currentCard.native;
-
-    document.getElementById('cloze-input-area').classList.remove('hidden');
-    document.getElementById('cloze-answer').focus();
-}
-
-function checkCloze() {
-    const input = document.getElementById('cloze-answer');
-    const userVal = input.value.trim().toLowerCase();
-    const correctVal = window.clozeAnswer.toLowerCase();
-
-    if(userVal === correctVal) {
-        input.classList.add('input-correct');
-        setTimeout(revealAnswer, 600);
-    } else {
-        input.classList.add('input-wrong');
-        setTimeout(revealAnswer, 1500); 
-    }
-}
-
-function revealAnswer() {
-    document.getElementById('card-answer').classList.remove('hidden');
-    document.getElementById('card-question').onclick = null;
-}
-
-function handleRating(rating) {
-    if (!isCramSession) {
-        if (rating === 0) {
-            currentCard.interval = 0;
-            currentCard.dueDate = Date.now();
+        if (dueCount > 0) {
+            box.className = 'stats-box'; 
+            heading.textContent = "Reviews Due";
+            count.textContent = dueCount;
+            btn.textContent = "Review Now";
+            btn.onclick = () => StudySession.start('DUE');
+        } else if (newCount > 0) {
+            box.className = 'stats-box green';
+            heading.textContent = "New Cards";
+            count.textContent = newCount;
+            const batch = Math.min(10, newCount);
+            btn.textContent = `Learn New (+${batch})`;
+            btn.onclick = () => StudySession.start('NEW', batch);
         } else {
-            if (currentCard.interval === 0) currentCard.interval = 1;
-            const multipliers = [0, 1.2, 2.5, 4.0];
-            currentCard.interval = Math.ceil(currentCard.interval * multipliers[rating]);
-            currentCard.dueDate = Date.now() + (currentCard.interval * 24 * 60 * 60 * 1000);
+            box.className = 'stats-box orange';
+            heading.textContent = "All Caught Up";
+            count.textContent = "0";
+            btn.textContent = "Cram Mode";
+            btn.onclick = () => document.getElementById('modal-cram-settings').classList.remove('hidden');
         }
-        saveData();
+        
+        const recent = await db.chapters.orderBy('id').reverse().limit(3).toArray();
+        document.getElementById('home-activity-list').innerHTML = recent.map(c => `
+            <div class="chapter-item" onclick="Reader.open(${c.id})">
+                <span class="item-main">${c.title}</span>
+                <span class="item-sub">${c.segments.length} segs</span>
+            </div>
+        `).join('');
     }
-    reviewQueue.shift();
-    loadNextReviewCard();
-}
+};
 
-// --- GAME ENGINE (Infinite Speed) ---
-function startGame() {
-    if (cards.length < 5) return alert("Add at least 5 cards!");
-    gameRound = 1;
-    startRound();
-}
-
-function startRound() {
-    gameQueue = shuffle([...cards]).slice(0, 10);
-    // Infinite Decay: 3000 * 0.8^(r-1), floor 250
-    let calcSpeed = 3000 * Math.pow(0.8, gameRound - 1);
-    gameSpeed = Math.floor(Math.max(250, calcSpeed));
-    startWatchPhase();
-}
-
-function startWatchPhase() {
-    gamePhase = 'WATCH';
-    gameIndex = 0;
-    showView('game');
-    document.getElementById('game-status').textContent = `Round ${gameRound} (Speed: ${gameSpeed}ms)`;
-    document.getElementById('game-input-area').classList.add('hidden');
-    playNextWatchCard();
-}
-
-function playNextWatchCard() {
-    if (gameIndex >= gameQueue.length) {
-        startTestPhase();
-        return;
-    }
-    const card = gameQueue[gameIndex];
+// ==========================================
+// 6. MODULE: STUDY SESSION
+// ==========================================
+const StudySession = {
+    queue: [],
+    current: null,
     
-    // Game Tag Badge
-    const badge = document.getElementById('game-tag-badge');
-    if (card.tag) {
-        badge.textContent = card.tag;
-        badge.classList.remove('hidden');
-    } else {
-        badge.classList.add('hidden');
+    async start(mode, batchSize=10) {
+        if (mode === 'DUE') {
+            this.queue = await db.cards.where('dueDate').belowOrEqual(Date.now()).toArray();
+        } else if (mode === 'NEW') {
+            this.queue = await db.cards.where('status').equals('NEW').limit(batchSize).toArray();
+            this.queue.forEach(c => c.status = 'ACTIVE');
+        } else if (mode === 'CRAM') {
+            // Filter logic handled in Cram UI logic
+        }
+        
+        if (this.queue.length === 0) return alert("Nothing to study!");
+        UI.toggleOverlay('overlay-study', true);
+        this.loadNext();
+    },
+
+    async loadNext() {
+        if (this.queue.length === 0) {
+            alert("Session Complete!");
+            UI.toggleOverlay('overlay-study', false);
+            Dashboard.refresh();
+            return;
+        }
+        
+        this.current = this.queue[0];
+        document.getElementById('study-progress').textContent = `${this.queue.length} Left`;
+        
+        // Reset UI
+        document.getElementById('study-answer').classList.add('hidden');
+        document.getElementById('study-cloze-area').classList.add('hidden');
+        document.getElementById('study-sub-text').classList.add('hidden');
+        document.getElementById('btn-show-hint').classList.add('hidden');
+        
+        // Tags & Audio
+        const badge = document.getElementById('study-tag-badge');
+        badge.textContent = this.current.tag || "";
+        badge.classList.toggle('hidden', !this.current.tag);
+        
+        const audioBlob = await AudioService.getAudioForCard(this.current.id);
+        document.getElementById('btn-play-audio').onclick = () => AudioService.play(audioBlob || this.current.target);
+
+        // Render based on Type
+        if (this.current.type === 'SENTENCE') this.renderCloze();
+        else {
+            // Bi-Directional: 70% Recog, 30% Recall
+            if (Math.random() > 0.3) this.renderRecog();
+            else this.renderRecall();
+        }
+    },
+
+    renderRecog() {
+        document.getElementById('study-hint-label').textContent = "Translate to Native:";
+        document.getElementById('study-main-text').textContent = this.current.target;
+        document.getElementById('study-main-text').onclick = () => this.reveal();
+    },
+
+    renderRecall() {
+        document.getElementById('study-hint-label').textContent = "Translate to Target:";
+        document.getElementById('study-main-text').textContent = this.current.native;
+        if(this.current.meta) {
+            const btn = document.getElementById('btn-show-hint');
+            btn.classList.remove('hidden');
+            btn.onclick = () => {
+                document.getElementById('study-sub-text').textContent = this.current.meta;
+                document.getElementById('study-sub-text').classList.remove('hidden');
+            };
+        }
+        document.getElementById('study-main-text').onclick = () => this.reveal();
+    },
+
+    renderCloze() {
+        document.getElementById('study-hint-label').textContent = this.current.native;
+        const isChinese = Logic.isCJK(this.current.target);
+        let words = isChinese ? this.current.target.split('') : this.current.target.split(' ');
+        
+        // Sticky Logic: use lockedIndex if available
+        let index;
+        if (this.current.lockedIndex !== null && this.current.lockedIndex !== undefined) {
+             index = this.current.lockedIndex;
+        } else {
+             index = Math.floor(Math.random() * words.length);
+        }
+        
+        this.current.tempIndex = index; // Store for this turn
+        const answer = words[index];
+        words[index] = "___";
+        
+        document.getElementById('study-main-text').textContent = words.join(isChinese ? '' : ' ');
+        document.getElementById('study-main-text').onclick = null;
+        
+        const inputDiv = document.getElementById('study-cloze-area');
+        inputDiv.classList.remove('hidden');
+        const input = document.getElementById('cloze-answer');
+        input.value = '';
+        input.focus();
+        
+        document.getElementById('btn-check-cloze').onclick = () => {
+            if (input.value.trim().toLowerCase() === answer.toLowerCase()) {
+                input.classList.add('input-correct');
+                setTimeout(() => this.reveal(), 500);
+            } else {
+                input.classList.add('input-wrong');
+                setTimeout(() => this.reveal(), 1000);
+            }
+        };
+    },
+
+    reveal() {
+        document.getElementById('study-answer').classList.remove('hidden');
+        document.getElementById('ans-target').textContent = this.current.target;
+        document.getElementById('ans-meta').textContent = this.current.meta || "";
+        document.getElementById('ans-native').textContent = this.current.native;
+    },
+
+    async rate(rating) {
+        // Handle Sticky Cloze locking
+        if (this.current.type === 'SENTENCE' && rating === 0) {
+            this.current.lockedIndex = this.current.tempIndex;
+        }
+
+        const res = Logic.calculateNextReview(this.current, rating);
+        
+        await db.cards.update(this.current.id, {
+            interval: res.interval,
+            dueDate: res.dueDate,
+            lapses: res.lapses,
+            status: res.status,
+            lockedIndex: res.lockedIndex
+        });
+
+        if (rating === 0) this.queue.push(this.current); // Re-queue
+        this.queue.shift();
+        this.loadNext();
     }
+};
 
-    document.getElementById('game-card-content').innerHTML = `
-        <h2 style="font-size: 2.5rem; margin-bottom:5px;">${card.target}</h2>
-        <p style="color:#666; font-size:1rem;">${card.native}</p>
-        ${card.meta ? `<p class="meta-text">${card.meta}</p>` : ''}
-    `;
-    
-    gameTimer = setTimeout(() => {
-        gameIndex++;
-        playNextWatchCard();
-    }, gameSpeed);
-}
+// ==========================================
+// 7. MODULE: STREAM BUILDER
+// ==========================================
+const StreamBuilder = {
+    segments: [],
+    tempBlob: null,
 
-function startTestPhase() {
-    gamePhase = 'TEST';
-    gameIndex = 0;
-    gameScore = 0;
-    document.getElementById('game-status').textContent = `Round ${gameRound}: Test!`;
-    document.getElementById('game-input-area').classList.remove('hidden');
-    nextTestCard();
-}
+    init() {
+        this.segments = [];
+        this.tempBlob = null;
+        document.getElementById('builder-stream').innerHTML = '<div class="empty-state">Start adding...</div>';
+        document.getElementById('builder-title').value = '';
+    },
 
-function nextTestCard() {
-    if (gameIndex >= gameQueue.length) {
-        endRound();
-        return;
-    }
-    const card = gameQueue[gameIndex];
-    
-    // Tag Badge
-    const badge = document.getElementById('game-tag-badge');
-    if (card.tag) {
-        badge.textContent = card.tag;
-        badge.classList.remove('hidden');
-    } else {
-        badge.classList.add('hidden');
-    }
+    async toggleRecord() {
+        const btn = document.getElementById('btn-record');
+        const status = document.getElementById('recording-status');
+        
+        if (btn.classList.contains('recording')) {
+            btn.classList.remove('recording');
+            status.classList.add('hidden');
+            this.tempBlob = await AudioService.stopRecording();
+            btn.textContent = '✅';
+        } else {
+            const started = await AudioService.startRecording();
+            if (started) {
+                btn.classList.add('recording');
+                status.classList.remove('hidden');
+                btn.textContent = '⏹';
+            }
+        }
+    },
 
-    document.getElementById('game-card-content').innerHTML = `
-        <h2 style="font-size: 2.5rem;">${card.target}</h2>
-    `;
-    const input = document.getElementById('game-input');
-    input.value = '';
-    input.className = ''; 
-    input.focus();
-    document.getElementById('btn-game-override').classList.add('hidden');
-}
+    async handleFileSelect() {
+        const fileInput = document.getElementById('dock-file');
+        this.tempBlob = await AudioService.handleFileUpload(fileInput);
+        if(this.tempBlob) {
+            document.getElementById('file-status').textContent = "File Ready";
+            document.getElementById('file-status').classList.remove('hidden');
+        }
+    },
 
-function checkGameAnswer(override = false) {
-    const input = document.getElementById('game-input');
-    const userVal = input.value;
-    const card = gameQueue[gameIndex];
-    
-    if (override) {
-        gameScore++;
-        finishCardLogic(true);
-        return;
-    }
+    addSegment() {
+        const target = document.getElementById('dock-target').value;
+        const native = document.getElementById('dock-native').value;
+        const meta = document.getElementById('dock-meta').value;
+        if (!target) return;
 
-    if (isCloseEnough(userVal, card.native)) {
-        gameScore++;
-        finishCardLogic(true);
-    } else {
-        input.classList.add('input-wrong');
-        document.getElementById('game-card-content').innerHTML += `
-            <p style="color:#1dd1a1; font-weight:bold; margin-top:10px;">${card.native}</p>
+        this.segments.push({ target, native, meta, audioBlob: this.tempBlob, cardId: null });
+        
+        const div = document.createElement('div');
+        div.className = 'segment-bubble';
+        div.innerHTML = `
+            <div class="segment-target">${target}</div>
+            <div class="segment-native">${native}</div>
+            ${this.tempBlob ? '<span class="segment-audio-icon">🔊</span>' : ''}
         `;
-        document.getElementById('btn-game-override').classList.remove('hidden');
-        
-        if(input.classList.contains('input-wrong_confirmed')) {
-             finishCardLogic(false);
-        } else {
-             input.classList.add('input-wrong_confirmed'); 
-        }
+        const container = document.getElementById('builder-stream');
+        if (this.segments.length === 1) container.innerHTML = '';
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+
+        // Reset
+        document.getElementById('dock-target').value = '';
+        document.getElementById('dock-native').value = '';
+        document.getElementById('dock-meta').value = '';
+        document.getElementById('btn-record').textContent = '🎤';
+        document.getElementById('dock-file').value = '';
+        document.getElementById('file-status').classList.add('hidden');
+        this.tempBlob = null;
+    },
+
+    async save() {
+        const title = document.getElementById('builder-title').value || "Untitled";
+        const tag = document.getElementById('builder-tag').value;
+        await db.chapters.add({ title, tag, segments: this.segments });
+        alert("Chapter Saved!");
+        UI.toggleOverlay('overlay-builder', false);
+        Library.refresh();
     }
-}
+};
 
-function finishCardLogic(won) {
-    const content = document.getElementById('game-card-content');
-    content.style.borderColor = won ? '#1dd1a1' : '#ff6b6b';
-    setTimeout(() => {
-        content.style.borderColor = '#eee';
-        gameIndex++;
-        nextTestCard();
-    }, won ? 300 : 800);
-}
+// ==========================================
+// 8. MODULE: READER VIEW (Heatmap)
+// ==========================================
+const Reader = {
+    currentChapter: null,
+    showMeta: true,
+    showNative: true,
 
-function endRound() {
-    if (gameScore === gameQueue.length) {
-        const reward = gameRound * 10;
-        userCredits += reward;
-        saveCredits();
-        
-        if(confirm(`Round ${gameRound} Cleared! +${reward} ⚡\nReady for faster speed?`)) {
-            gameRound++;
-            startRound(); 
-        } else {
-            showView('dashboard');
-        }
-    } else {
-        alert(`Game Over! Score: ${gameScore}/${gameQueue.length}`);
-        showView('dashboard');
-    }
-}
+    async open(chapterId) {
+        this.currentChapter = await db.chapters.get(chapterId);
+        UI.toggleOverlay('overlay-reader', true);
+        document.getElementById('reader-title').textContent = this.currentChapter.title;
+        this.renderText();
+    },
 
-// --- HELPER: LEVENSHTEIN ---
-function isCloseEnough(input, target) {
-    const s = input.toLowerCase().trim();
-    const t = target.toLowerCase().trim();
-    if (s === t) return true;
-    if (isCJK(t)) return false; 
-    if (s.length < 3 || t.length < 3) return s === t;
+    toggleMeta() { 
+        this.showMeta = !this.showMeta; 
+        document.getElementById('btn-toggle-meta').classList.toggle('active', this.showMeta);
+        this.renderText(); 
+    },
     
-    const track = Array(t.length + 1).fill(null).map(() => Array(s.length + 1).fill(null));
-    for (let i = 0; i <= s.length; i++) track[0][i] = i;
-    for (let j = 0; j <= t.length; j++) track[j][0] = j;
-    for (let j = 1; j <= t.length; j++) {
-        for (let i = 1; i <= s.length; i++) {
-            const indicator = (s[i - 1] === t[j - 1]) ? 0 : 1;
-            track[j][i] = Math.min(track[j][i - 1] + 1, track[j - 1][i] + 1, track[j - 1][i - 1] + indicator);
-        }
-    }
-    return track[t.length][s.length] <= (Math.floor(t.length / 4) + 1);
-}
+    toggleNative() { 
+        this.showNative = !this.showNative;
+        document.getElementById('btn-toggle-native').classList.toggle('active', this.showNative); 
+        this.renderText(); 
+    },
 
-// --- EVENT LISTENERS ---
-function setupEventListeners() {
+    async renderText() {
+        const container = document.getElementById('reader-content');
+        container.innerHTML = '';
+        
+        // Heatmap logic: Check if segments have cardId or if text matches an existing card
+        // Optimization: In real app, fetch all cards first. Here we assume segments store cardId
+        
+        this.currentChapter.segments.forEach((seg, index) => {
+            const span = document.createElement('span');
+            span.className = 'reader-segment';
+            
+            // Color Logic
+            if (seg.cardId) span.classList.add('known');
+            else span.classList.add('unknown');
+            
+            // Text Logic
+            let text = seg.target;
+            if (this.showMeta && seg.meta) text += ` (${seg.meta})`;
+            if (this.showNative && seg.native) text += `\n[${seg.native}]`;
+            
+            span.innerText = text + (Logic.isCJK(seg.target) ? '' : ' ');
+            span.onclick = () => this.openSheet(seg, index);
+            container.appendChild(span);
+        });
+        
+        document.getElementById('btn-reader-play').onclick = () => this.playAll();
+    },
+    
+    async playAll() {
+        for (const seg of this.currentChapter.segments) {
+            // Highlight current
+            await AudioService.play(seg.audioBlob || seg.target);
+            // Simple delay hack to wait for TTS finish would go here
+            await new Promise(r => setTimeout(r, 2000)); 
+        }
+    },
+
+    openSheet(seg, index) {
+        const sheet = document.getElementById('reader-sheet');
+        sheet.classList.remove('hidden');
+        document.getElementById('sheet-target').textContent = seg.target;
+        document.getElementById('sheet-native').textContent = seg.native;
+        
+        document.getElementById('btn-sheet-play').onclick = () => AudioService.play(seg.audioBlob || seg.target);
+
+        const btnPromote = document.getElementById('btn-sheet-promote');
+        if (seg.cardId) {
+            btnPromote.textContent = "✓ Already in Deck";
+            btnPromote.disabled = true;
+        } else {
+            btnPromote.textContent = "Promote to Card";
+            btnPromote.disabled = false;
+            btnPromote.onclick = () => this.promote(seg, index);
+        }
+    },
+
+    async promote(seg, index) {
+        const cardId = await db.cards.add({
+            type: 'SENTENCE',
+            target: seg.target,
+            native: seg.native,
+            meta: seg.meta,
+            tag: this.currentChapter.tag,
+            status: 'NEW',
+            dueDate: null,
+            interval: 0,
+            lapses: 0
+        });
+
+        if (seg.audioBlob) await AudioService.saveAudio(seg.audioBlob, cardId);
+
+        this.currentChapter.segments[index].cardId = cardId;
+        await db.chapters.put(this.currentChapter);
+        
+        alert("Promoted!");
+        this.renderText(); // Update color
+        document.getElementById('reader-sheet').classList.add('hidden');
+    }
+};
+
+// ==========================================
+// 9. MODULE: DECK & IMPORT
+// ==========================================
+const Deck = {
+    async refresh() {
+        const list = await db.cards.limit(50).toArray(); 
+        const container = document.getElementById('card-list');
+        container.innerHTML = list.map(c => `
+            <div class="card-item">
+                <div>
+                    <span class="item-main">${c.target}</span><br>
+                    <span class="item-sub">${c.native}</span>
+                </div>
+                <div>
+                    <button class="small-btn" onclick="Deck.delete(${c.id})">🗑</button>
+                </div>
+            </div>
+        `).join('');
+    },
+    async delete(id) {
+        if(confirm("Delete card?")) {
+            await db.cards.delete(id);
+            this.refresh();
+            Dashboard.refresh();
+        }
+    },
+    async runBulkImport() {
+        const raw = document.getElementById('input-bulk').value;
+        const tag = document.getElementById('input-bulk-tag').value;
+        if (!raw.trim()) return;
+
+        const lines = raw.split('\n');
+        let count = 0;
+        const delimiter = raw.indexOf('\t') !== -1 ? '\t' : ',';
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            let parts = line.split(delimiter).map(s => s.trim());
+            if (parts.length < 2 || parts[0].toLowerCase().includes('target')) continue;
+
+            let target = parts[0];
+            let meta = parts.length > 2 ? parts[1] : "";
+            let native = parts.length > 2 ? parts[2] : parts[1];
+
+            // Type Detection
+            let type = 'VOCAB';
+            if (Logic.isCJK(target)) {
+                if (/[。？！，,?!]/.test(target)) type = 'SENTENCE';
+            } else {
+                if (target.split(' ').length > 3) type = 'SENTENCE';
+            }
+
+            await db.cards.add({
+                type, target, meta, native, tag,
+                status: 'NEW', dueDate: null, interval: 0, lapses: 0
+            });
+            count++;
+        }
+        
+        alert(`Imported ${count} cards!`);
+        document.getElementById('modal-import').classList.add('hidden');
+        Dashboard.refresh();
+    }
+};
+
+// ==========================================
+// 10. LISTENER WIRING
+// ==========================================
+const Library = {
+    async refresh() {
+        const list = await db.chapters.toArray();
+        document.getElementById('chapter-list').innerHTML = list.map(c => `
+            <div class="chapter-item" onclick="Reader.open(${c.id})">
+                <span class="item-main">${c.title}</span>
+                <span class="item-sub">${c.segments.length} segs</span>
+            </div>
+        `).join('');
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    Logic.userCredits = parseInt(localStorage.getItem('fd6_credits')) || 100;
+    UI.updateCredits();
+    Dashboard.refresh();
+
     // Nav
-    document.getElementById('btn-add-view').onclick = () => showView('add');
-    document.querySelectorAll('.back-btn').forEach(b => b.onclick = () => showView('dashboard'));
-    document.getElementById('btn-settings').onclick = () => showView('settings');
-    document.getElementById('btn-quit-review').onclick = () => showView('dashboard');
-    document.getElementById('btn-quit-game').onclick = () => { clearTimeout(gameTimer); showView('dashboard'); };
-    
-    // Actions
-    document.getElementById('btn-game').onclick = startGame;
-    document.getElementById('add-form').onsubmit = saveCard;
-    document.getElementById('input-target').addEventListener('input', updateInputLabels);
+    document.querySelectorAll('.nav-item').forEach(btn => {
+        btn.onclick = () => UI.showTab(btn.dataset.target);
+    });
+
+    // Overlays
+    document.getElementById('btn-new-chapter').onclick = () => { StreamBuilder.init(); UI.toggleOverlay('overlay-builder', true); };
+    document.getElementById('btn-quit-builder').onclick = () => UI.toggleOverlay('overlay-builder', false);
+    document.getElementById('btn-quit-study').onclick = () => { UI.toggleOverlay('overlay-study', false); Dashboard.refresh(); };
+    document.getElementById('btn-quit-reader').onclick = () => UI.toggleOverlay('overlay-reader', false);
+    document.getElementById('btn-add-card').onclick = () => document.getElementById('modal-add-card').classList.remove('hidden');
+    document.getElementById('btn-qa-cancel').onclick = () => document.getElementById('modal-add-card').classList.add('hidden');
+
+    // Stream Builder
+    document.getElementById('btn-record').onclick = () => StreamBuilder.toggleRecord();
+    document.getElementById('dock-file').onchange = () => StreamBuilder.handleFileSelect();
+    document.getElementById('btn-add-segment').onclick = () => StreamBuilder.addSegment();
+    document.getElementById('btn-save-chapter').onclick = () => StreamBuilder.save();
+
+    // Reader
+    document.getElementById('btn-toggle-meta').onclick = () => Reader.toggleMeta();
+    document.getElementById('btn-toggle-native').onclick = () => Reader.toggleNative();
 
     // Import
     document.getElementById('btn-open-import').onclick = () => document.getElementById('modal-import').classList.remove('hidden');
     document.getElementById('btn-cancel-import').onclick = () => document.getElementById('modal-import').classList.add('hidden');
-    document.getElementById('btn-run-import').onclick = runBulkImport;
+    document.getElementById('btn-run-import').onclick = () => Deck.runBulkImport();
 
-    // Cram Config
-    document.getElementById('btn-cancel-cram').onclick = () => document.getElementById('modal-cram-settings').classList.add('hidden');
-    document.getElementById('btn-start-cram').onclick = runCramSession;
-    
-    // Cram Toggles
-    const cramToggles = document.querySelectorAll('#modal-cram-settings .toggle-btn');
-    cramToggles.forEach(t => t.onclick = (e) => {
-        cramToggles.forEach(b => b.classList.remove('active'));
-        e.target.classList.add('active');
-    });
+    // Quick Add
+    document.getElementById('form-quick-add').onsubmit = async (e) => {
+        e.preventDefault();
+        // Handle Audio
+        const fileInput = document.getElementById('qa-file');
+        let blob = null;
+        if(fileInput.files.length) blob = fileInput.files[0];
 
-    // Toggles (Add Form)
-    document.getElementById('type-vocab').onclick = (e) => {
-        addType = 'VOCAB';
-        e.target.classList.add('active');
-        document.getElementById('type-sentence').classList.remove('active');
+        const cardId = await db.cards.add({
+            target: document.getElementById('qa-target').value,
+            native: document.getElementById('qa-native').value,
+            meta: document.getElementById('qa-meta').value,
+            tag: document.getElementById('qa-tag').value,
+            type: 'VOCAB', status: 'NEW', dueDate: null
+        });
+        
+        if(blob) await AudioService.saveAudio(blob, cardId);
+        
+        document.getElementById('modal-add-card').classList.add('hidden');
+        alert("Saved to New Queue");
+        Dashboard.refresh();
     };
-    document.getElementById('type-sentence').onclick = (e) => {
-        addType = 'SENTENCE';
-        e.target.classList.add('active');
-        document.getElementById('type-vocab').classList.remove('active');
+
+    // Cram
+    document.getElementById('btn-start-cram').onclick = () => {
+        if(Logic.userCredits < 50) return alert("Need 50 ⚡");
+        Logic.addCredits(-50);
+        document.getElementById('modal-cram-settings').classList.add('hidden');
+        // Logic needed for filtering pool
+        StudySession.queue = []; // Placeholder for cram logic
+        alert("Cram Mode Unlocked (Logic placeholder)");
     };
 
-    // Review Inputs
-    document.getElementById('btn-check-cloze').onclick = checkCloze;
-    document.getElementById('cloze-answer').addEventListener('keypress', (e) => { if(e.key === 'Enter') checkCloze(); });
+    // Rating
     document.querySelectorAll('.rate-btn').forEach(btn => {
-        btn.onclick = () => handleRating(parseInt(btn.dataset.rating));
+        btn.onclick = () => StudySession.rate(parseInt(btn.dataset.rating));
     });
 
-    // Game Inputs
-    document.getElementById('btn-game-submit').onclick = () => checkGameAnswer(false);
-    document.getElementById('btn-game-override').onclick = () => checkGameAnswer(true);
-    document.getElementById('game-input').addEventListener('keypress', (e) => { 
-        if(e.key === 'Enter') checkGameAnswer(false); 
-    });
-
-    // Settings
-    document.getElementById('btn-clear').onclick = () => {
-        if(confirm("Delete all data?")) { cards = []; saveData(); }
+    // Reset
+    document.getElementById('btn-clear-db').onclick = async () => {
+        if(confirm("Destroy Database?")) { await Dexie.delete('FlashDeckDB_v6'); location.reload(); }
     };
-    document.getElementById('btn-download').onclick = () => {
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(cards));
-        const anchor = document.createElement('a');
-        anchor.href = dataStr;
-        anchor.download = "flashdeck_v3_backup.json";
-        anchor.click();
-    };
-    document.getElementById('file-upload').onchange = (e) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => { cards = JSON.parse(ev.target.result); saveData(); alert("Restored!"); };
-        reader.readAsText(e.target.files[0]);
-    };
-
-    window.editCard = editCard;
-    window.deleteCard = deleteCard;
-}
-
-init();
+});
