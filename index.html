@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FlashDeck v8</title>
+    <title>FlashDeck v9</title>
     <link rel="stylesheet" href="style.css">
     
     <script src="dexie.js"></script>
@@ -32,15 +32,15 @@
         <section id="view-home" class="active-view">
             <div class="daily-stats-row">
                 <div class="mini-stat">
-                    <span class="ms-label">Reviewed</span>
+                    <span class="ms-label">Reviewed Today</span>
                     <span class="ms-val" id="daily-reviews">0</span>
                 </div>
                 <div class="mini-stat">
-                    <span class="ms-label">New Cards</span>
+                    <span class="ms-label">Learned Today</span>
                     <span class="ms-val" id="daily-learned">0</span>
                 </div>
                 <div class="mini-stat">
-                    <span class="ms-label">Mastered</span>
+                    <span class="ms-label">Total Mastered</span>
                     <span class="ms-val" id="total-mastered">0</span>
                 </div>
             </div>
@@ -87,16 +87,14 @@
             <h2>Settings</h2>
             <div class="settings-content">
                 <button id="btn-backup" class="secondary-btn">Download Backup (.zip)</button>
-                
                 <label class="secondary-btn" style="display:block; text-align:center; margin-top:10px; cursor:pointer;">
                     Restore Backup (.zip)
                     <input type="file" id="file-restore" accept=".zip" hidden>
                 </label>
-
                 <hr>
                 <button id="btn-clear-db" class="danger-btn">Reset Database</button>
                 <div class="info-block">
-                    <p class="small-text">Version 8.0. Local Storage Mode.</p>
+                    <p class="small-text">Version 9.0. Local Storage Mode.</p>
                 </div>
             </div>
         </section>
@@ -114,22 +112,18 @@
                 <span id="study-mode-badge" class="tag">Review</span>
                 <span id="study-progress">1 / 10</span>
             </div>
-            
             <div class="card-area" id="study-click-target">
                 <div id="study-tag-badge" class="tag-badge hidden">TAG</div>
-                
                 <div id="study-question">
                     <span class="hint-text" id="study-hint-label">...</span>
                     <h3 id="study-main-text">...</h3>
                     <button id="btn-show-hint" class="text-btn hidden">Show Hint</button>
                     <p id="study-sub-text" class="hidden">...</p>
                 </div>
-
                 <div id="study-cloze-area" class="hidden">
                     <input type="text" id="cloze-answer" placeholder="Type answer..." autocomplete="off">
                     <button id="btn-check-cloze" class="secondary-btn">Check</button>
                 </div>
-
                 <div id="study-answer" class="hidden">
                     <div class="divider"></div>
                     <div class="answer-box">
@@ -159,8 +153,7 @@
                 <input type="text" id="builder-tag" placeholder="Language Tag">
             </div>
             <div id="builder-stream" class="stream-container">
-                <div class="empty-state">Add sentences below to build your story.</div>
-            </div>
+                </div>
             <div class="builder-dock">
                 <div class="dock-inputs">
                     <input type="text" id="dock-target" placeholder="Target text...">
@@ -182,9 +175,15 @@
         <div id="overlay-reader" class="overlay hidden">
             <div class="overlay-header">
                 <button id="btn-quit-reader" class="text-btn">Close</button>
-                <div class="reader-toggles">
-                    <button id="btn-toggle-meta" class="toggle-icon">Pinyin</button>
-                    <button id="btn-toggle-native" class="toggle-icon">Eng</button>
+                <div class="reader-header-content">
+                    <div class="reader-toggles">
+                        <button id="btn-toggle-meta" class="toggle-icon">Pinyin</button>
+                        <button id="btn-toggle-native" class="toggle-icon">Eng</button>
+                    </div>
+                    <div class="reader-legend">
+                        <span class="legend-dot green"></span>Known
+                        <span class="legend-dot grey"></span>New
+                    </div>
                 </div>
             </div>
             <div id="reader-content" class="reader-body"></div>
@@ -231,7 +230,6 @@
                     <textarea id="qa-target" placeholder="Target" required></textarea>
                     <input type="text" id="qa-meta" placeholder="Meta/Pinyin">
                     <textarea id="qa-native" placeholder="Native" required></textarea>
-                    
                     <div class="audio-control-row">
                         <button type="button" id="btn-qa-record" class="secondary-btn">🎤 Record</button>
                         <label class="secondary-btn" style="text-align:center; cursor:pointer;">
@@ -239,7 +237,6 @@
                         </label>
                     </div>
                     <span id="qa-audio-status" class="small-text" style="display:block; margin-bottom:10px;">No audio</span>
-
                     <div class="modal-actions">
                         <button type="button" id="btn-qa-cancel" class="secondary-btn">Cancel</button>
                         <button type="submit" class="primary-btn">Save</button>
@@ -251,8 +248,7 @@
         <div id="modal-import" class="modal hidden">
             <div class="modal-content">
                 <h3>Import Cards</h3>
-                <p class="small-text">Paste Excel/CSV. Added to <b>New Queue</b>.</p>
-                <p class="tiny-text">Format: <code>Target [TAB] Meta [TAB] Native</code></p>
+                <p class="small-text">Target [TAB] Meta [TAB] Native</p>
                 <input type="text" id="input-bulk-tag" placeholder="Tag (e.g. French)">
                 <textarea id="input-bulk" placeholder="Paste data here..."></textarea>
                 <div class="modal-actions">
@@ -277,11 +273,17 @@
         
         <div id="modal-cram-settings" class="modal hidden">
             <div class="modal-content">
-                <h3>Cram Mode</h3>
+                <button id="btn-close-cram" class="close-modal-x">✖</button> <h3>Cram Mode</h3>
                 <p class="small-text">Cost: <span style="color:#e17055;">50 ⚡</span></p>
-                <select id="cram-tag-select" style="width:100%; padding:10px; margin:10px 0;">
+                <label class="small-text" style="display:block; margin-top:10px;">Filter by Tag:</label>
+                <select id="cram-tag-select" style="width:100%; padding:10px; margin:5px 0 15px 0;">
                     <option value="ALL">All Tags</option>
                 </select>
+                <div class="toggle-container" style="margin-bottom:20px;">
+                    <button id="cram-type-mix" class="toggle-btn active">Mix</button>
+                    <button id="cram-type-vocab" class="toggle-btn">Words</button>
+                    <button id="cram-type-sentence" class="toggle-btn">Sentences</button>
+                </div>
                 <div class="modal-actions">
                     <button id="btn-cancel-cram" class="secondary-btn">Cancel</button>
                     <button id="btn-start-cram" class="primary-btn cram-btn">Start</button>
