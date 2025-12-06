@@ -550,7 +550,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (typeof Dexie === 'undefined' || typeof JSZip === 'undefined') throw new Error("Missing Libraries!");
         
         db = new Dexie('FlashDeckDB_v8');
-        db.version(1).stores({ cards: '++id, type, tag, status, dueDate', chapters: '++id, title, tag', audio: '++id, cardId, segmentId' });
+        db.version(1).stores({ cards: '++id, type, tag, status, dueDate, interval', chapters: '++id, title, tag', audio: '++id, cardId, segmentId' });
 
         Logic.checkDailyReset();
         UI.updateStats();
