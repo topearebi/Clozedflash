@@ -1,20 +1,16 @@
-// ==========================================
-// 1. GLOBAL VARIABLES
-// ==========================================
-// We declare db here so it is globally accessible, 
-// but we initialize it later in the Init block.
-let db; 
+let db; // Global DB Reference
 
 // ==========================================
-// 2. LOGIC & GAMIFICATION
+// 1. LOGIC & GAMIFICATION
 // ==========================================
 const Logic = {
-    gamification: JSON.parse(localStorage.getItem('fd7_gamification')) || { streak: 0, lastStudyDate: null, xp: 0, level: 1, sparks: 100 },
-    dailyStats: JSON.parse(localStorage.getItem('fd7_daily')) || { date: new Date().toDateString(), reviews: 0, learned: 0 },
+    // Bug Fix #6: Start sparks at 50, not 100
+    gamification: JSON.parse(localStorage.getItem('fd8_gamification')) || { streak: 0, lastStudyDate: null, xp: 0, level: 1, sparks: 50 },
+    dailyStats: JSON.parse(localStorage.getItem('fd8_daily')) || { date: new Date().toDateString(), reviews: 0, learned: 0 },
 
     saveState() {
-        localStorage.setItem('fd7_gamification', JSON.stringify(this.gamification));
-        localStorage.setItem('fd7_daily', JSON.stringify(this.dailyStats));
+        localStorage.setItem('fd8_gamification', JSON.stringify(this.gamification));
+        localStorage.setItem('fd8_daily', JSON.stringify(this.dailyStats));
         UI.updateStats();
     },
 
@@ -27,7 +23,8 @@ const Logic = {
         if (last !== today) {
             const yesterday = new Date(Date.now() - 86400000).toDateString();
             if (last !== yesterday && last !== null) this.gamification.streak = 0;
-            if (last !== today) { this.addSparks(50); } // Silent bonus
+            // Only add sparks if it's a new day visit (not first load ever)
+            if (last !== null) { this.addSparks(50); alert("Daily Bonus! +50 ⚡"); }
             this.gamification.lastStudyDate = today;
         }
         this.saveState();
@@ -70,7 +67,7 @@ const Logic = {
 };
 
 // ==========================================
-// 3. AUDIO SERVICE
+// 2. AUDIO SERVICE
 // ==========================================
 const AudioService = {
     recorder: null, chunks: [],
@@ -104,7 +101,6 @@ const AudioService = {
     },
 
     async play(blobOrText) {
-        if (!blobOrText) return;
         if (blobOrText instanceof Blob) {
             const url = URL.createObjectURL(blobOrText);
             const audio = new Audio(url);
@@ -129,7 +125,7 @@ const AudioService = {
 };
 
 // ==========================================
-// 4. UI CONTROLLER
+// 3. UI CONTROLLER
 // ==========================================
 const UI = {
     showTab(tabId) {
@@ -142,14 +138,18 @@ const UI = {
         if (tabId === 'view-home') Dashboard.refresh();
         if (tabId === 'view-read') Library.refresh();
         if (tabId === 'view-browse') Deck.refresh();
-        if (tabId === 'view-settings') Settings.refresh();
     },
     updateStats() {
-        document.getElementById('credit-count').textContent = Logic.gamification.sparks;
-        document.getElementById('stat-streak').textContent = Logic.gamification.streak;
-        document.getElementById('stat-level').textContent = Logic.gamification.level;
+        document.getElementById('header-sparks').textContent = Logic.gamification.sparks;
+        document.getElementById('header-streak').textContent = Logic.gamification.streak;
+        document.getElementById('header-level').textContent = "Lvl " + Logic.gamification.level;
         document.getElementById('daily-reviews').textContent = Logic.dailyStats.reviews;
         document.getElementById('daily-learned').textContent = Logic.dailyStats.learned;
+        
+        // XP Bar Calc
+        const xp = Logic.gamification.xp;
+        const progress = (xp % 1000) / 10; // 0-100%
+        document.getElementById('header-xp-bar').style.width = `${progress}%`;
     },
     toggleOverlay(id, show) {
         const el = document.getElementById(id);
@@ -158,11 +158,11 @@ const UI = {
 };
 
 // ==========================================
-// 5. DASHBOARD
+// 4. MODULES
 // ==========================================
 const Dashboard = {
     async refresh() {
-        if (!db) return; // Safety check
+        if (!db) return;
         const now = Date.now();
         const dueCount = await db.cards.where('dueDate').belowOrEqual(now).count();
         const newCount = await db.cards.where('status').equals('NEW').count();
@@ -194,9 +194,6 @@ const Dashboard = {
     }
 };
 
-// ==========================================
-// 6. STUDY SESSION
-// ==========================================
 const StudySession = {
     queue: [], current: null,
     async start(mode, batchSize=10) {
@@ -205,9 +202,7 @@ const StudySession = {
         } else if (mode === 'NEW') {
             this.queue = await db.cards.where('status').equals('NEW').limit(batchSize).toArray();
             this.queue.forEach(c => c.status = 'ACTIVE');
-        } 
-        // Cram mode logic populates queue externally
-        
+        }
         if (this.queue.length === 0) return alert("Nothing to study!");
         UI.toggleOverlay('overlay-study', true);
         this.loadNext();
@@ -219,17 +214,18 @@ const StudySession = {
         this.current = this.queue[0];
         document.getElementById('study-progress').textContent = `${this.queue.length} Left`;
         
+        // Reset
         document.getElementById('study-answer').classList.add('hidden');
         document.getElementById('study-cloze-area').classList.add('hidden');
         document.getElementById('study-sub-text').classList.add('hidden');
         document.getElementById('btn-show-hint').classList.add('hidden');
         
+        // Bug Fix #7: Remove audio from front. (Logic: Only show if user demands hint?)
+        // We removed the button from HTML, so no JS needed here.
+        
         const badge = document.getElementById('study-tag-badge');
         badge.textContent = this.current.tag || "";
         badge.classList.toggle('hidden', !this.current.tag);
-        
-        const audioBlob = await AudioService.getAudioForCard(this.current.id);
-        document.getElementById('btn-play-audio').onclick = () => AudioService.play(audioBlob || this.current.target);
 
         if (this.current.type === 'SENTENCE') this.renderCloze();
         else { if (Math.random() > 0.3) this.renderRecog(); else this.renderRecall(); }
@@ -237,7 +233,11 @@ const StudySession = {
     renderRecog() {
         document.getElementById('study-hint-label').textContent = "Translate to Native:";
         document.getElementById('study-main-text').textContent = this.current.target;
-        document.getElementById('study-main-text').onclick = () => this.reveal();
+        // Bug Fix #8: Click listener on container
+        document.getElementById('study-click-target').onclick = (e) => {
+            // Prevent click if clicking hint button
+            if(e.target.id !== 'btn-show-hint' && e.target.tagName !== 'BUTTON') this.reveal();
+        };
     },
     renderRecall() {
         document.getElementById('study-hint-label').textContent = "Translate to Target:";
@@ -245,43 +245,48 @@ const StudySession = {
         if(this.current.meta) {
             const btn = document.getElementById('btn-show-hint');
             btn.classList.remove('hidden');
-            btn.onclick = () => { document.getElementById('study-sub-text').textContent = this.current.meta; document.getElementById('study-sub-text').classList.remove('hidden'); };
+            btn.onclick = (e) => { e.stopPropagation(); document.getElementById('study-sub-text').textContent = this.current.meta; document.getElementById('study-sub-text').classList.remove('hidden'); };
         }
-        document.getElementById('study-main-text').onclick = () => this.reveal();
+        document.getElementById('study-click-target').onclick = (e) => {
+            if(e.target.id !== 'btn-show-hint' && e.target.tagName !== 'BUTTON') this.reveal();
+        };
     },
     renderCloze() {
         document.getElementById('study-hint-label').textContent = this.current.native;
         const isChinese = Logic.isCJK(this.current.target);
         let words = isChinese ? this.current.target.split('') : this.current.target.split(' ');
-        
-        let index;
-        if (this.current.lockedIndex !== null && this.current.lockedIndex !== undefined) index = this.current.lockedIndex;
-        else index = Math.floor(Math.random() * words.length);
-        
+        let index = (this.current.lockedIndex != null) ? this.current.lockedIndex : Math.floor(Math.random() * words.length);
         this.current.tempIndex = index;
         const answer = words[index];
         words[index] = "___";
-        
         document.getElementById('study-main-text').textContent = words.join(isChinese ? '' : ' ');
-        document.getElementById('study-main-text').onclick = null;
+        document.getElementById('study-click-target').onclick = null;
         
         document.getElementById('study-cloze-area').classList.remove('hidden');
         const input = document.getElementById('cloze-answer');
         input.value = ''; input.focus();
         
-        document.getElementById('btn-check-cloze').onclick = () => {
-            if (input.value.trim().toLowerCase() === answer.toLowerCase()) {
-                input.classList.add('input-correct'); setTimeout(() => this.reveal(), 500);
-            } else {
-                input.classList.add('input-wrong'); setTimeout(() => this.reveal(), 1000);
-            }
-        };
+        // Bug Fix #9: Enter Key
+        input.onkeyup = (e) => { if(e.key === 'Enter') this.checkCloze(input, answer); };
+        document.getElementById('btn-check-cloze').onclick = () => this.checkCloze(input, answer);
     },
-    reveal() {
+    checkCloze(input, answer) {
+        if (input.value.trim().toLowerCase() === answer.toLowerCase()) {
+            input.classList.add('input-correct'); setTimeout(() => this.reveal(), 500);
+        } else {
+            input.classList.add('input-wrong'); setTimeout(() => this.reveal(), 1000);
+        }
+    },
+    async reveal() {
         document.getElementById('study-answer').classList.remove('hidden');
         document.getElementById('ans-target').textContent = this.current.target;
         document.getElementById('ans-meta').textContent = this.current.meta || "";
         document.getElementById('ans-native').textContent = this.current.native;
+        document.getElementById('study-click-target').onclick = null; // Disable flip
+        
+        // Audio on Back
+        const audioBlob = await AudioService.getAudioForCard(this.current.id);
+        document.getElementById('btn-play-audio').onclick = () => AudioService.play(audioBlob || this.current.target);
     },
     async rate(rating) {
         if (this.current.type === 'SENTENCE' && rating === 0) this.current.lockedIndex = this.current.tempIndex;
@@ -294,19 +299,28 @@ const StudySession = {
     }
 };
 
-// ==========================================
-// 7. STREAM BUILDER
-// ==========================================
 const StreamBuilder = {
-    segments: [], tempBlob: null,
-    init() { this.segments = []; document.getElementById('builder-stream').innerHTML = '<div class="empty-state">Start adding...</div>'; document.getElementById('builder-title').value = '';},
+    segments: [], tempBlob: null, editingId: null,
+    async init(chapterId=null) {
+        this.segments = []; document.getElementById('builder-stream').innerHTML = '<div class="empty-state">Start adding...</div>'; 
+        this.editingId = chapterId;
+        if(chapterId) {
+            const chap = await db.chapters.get(chapterId);
+            document.getElementById('builder-title').value = chap.title;
+            document.getElementById('builder-tag').value = chap.tag;
+            // Load existing segments (Simplified for MVP - re-adding them to UI)
+            chap.segments.forEach(s => this.addToUI(s));
+            this.segments = chap.segments;
+        } else {
+            document.getElementById('builder-title').value = '';
+            document.getElementById('builder-tag').value = '';
+        }
+    },
     async toggleRecord() { 
         const btn = document.getElementById('btn-record');
         if (btn.classList.contains('recording')) { 
             btn.classList.remove('recording'); this.tempBlob = await AudioService.stopRecording(); btn.textContent = '✅'; 
-        } else { 
-            if(await AudioService.startRecording()) { btn.classList.add('recording'); btn.textContent = '⏹'; } 
-        }
+        } else { if(await AudioService.startRecording()) { btn.classList.add('recording'); btn.textContent = '⏹'; } }
     },
     async handleFileSelect() { const f = document.getElementById('dock-file'); this.tempBlob = await AudioService.handleFileUpload(f); document.getElementById('file-status').classList.remove('hidden'); },
     addSegment() {
@@ -314,24 +328,29 @@ const StreamBuilder = {
         const native = document.getElementById('dock-native').value;
         const meta = document.getElementById('dock-meta').value;
         if (!target) return;
-        this.segments.push({ target, native, meta, audioBlob: this.tempBlob, cardId: null });
-        const div = document.createElement('div');
-        div.className = 'segment-bubble';
-        div.innerHTML = `<div class="segment-target">${target}</div><div class="segment-native">${native}</div>${this.tempBlob?'<span>🔊</span>':''}`;
-        document.getElementById('builder-stream').appendChild(div);
+        const seg = { target, native, meta, audioBlob: this.tempBlob, cardId: null };
+        this.segments.push(seg);
+        this.addToUI(seg);
         this.tempBlob = null; document.getElementById('dock-target').value = ''; document.getElementById('file-status').classList.add('hidden');
+    },
+    addToUI(seg) {
+        const div = document.createElement('div'); div.className = 'segment-bubble';
+        div.innerHTML = `<div class="segment-target">${seg.target}</div><div class="segment-native">${seg.native}</div>`;
+        document.getElementById('builder-stream').appendChild(div);
     },
     async save() {
         const title = document.getElementById('builder-title').value || "Untitled";
-        await db.chapters.add({ title: title, tag: document.getElementById('builder-tag').value, segments: this.segments });
+        const tag = document.getElementById('builder-tag').value;
+        if(this.editingId) {
+            await db.chapters.update(this.editingId, { title, tag, segments: this.segments });
+        } else {
+            await db.chapters.add({ title, tag, segments: this.segments });
+            // Bug Fix #11: No XP for creating, only reviewing
+        }
         alert("Saved!"); UI.toggleOverlay('overlay-builder', false); Library.refresh();
-        Logic.addXP(50);
     }
 };
 
-// ==========================================
-// 8. READER & IMPORTERS
-// ==========================================
 const Reader = {
     currentChapter: null, showMeta: true, showNative: true,
     async open(chapterId) {
@@ -360,8 +379,7 @@ const Reader = {
         for (const seg of this.currentChapter.segments) { await AudioService.play(seg.audioBlob || seg.target); await new Promise(r => setTimeout(r, 2000)); }
     },
     openSheet(seg, index) {
-        const sheet = document.getElementById('reader-sheet');
-        sheet.classList.remove('hidden');
+        document.getElementById('reader-sheet').classList.remove('hidden');
         document.getElementById('sheet-target').textContent = seg.target;
         document.getElementById('sheet-native').textContent = seg.native;
         document.getElementById('btn-sheet-play').onclick = () => AudioService.play(seg.audioBlob || seg.target);
@@ -374,7 +392,7 @@ const Reader = {
         if (seg.audioBlob) await AudioService.saveAudio(seg.audioBlob, cardId);
         this.currentChapter.segments[index].cardId = cardId;
         await db.chapters.put(this.currentChapter);
-        alert("Promoted!"); this.renderText(); document.getElementById('reader-sheet').classList.add('hidden'); Logic.addXP(20);
+        alert("Promoted!"); this.renderText(); document.getElementById('reader-sheet').classList.add('hidden'); 
     }
 };
 
@@ -396,11 +414,11 @@ const Importer = {
             await db.cards.add({ type, target, meta, native, tag, status: 'NEW', dueDate: null, interval: 0, lapses: 0 });
             count++;
         }
-        alert(`Imported ${count} cards to New Queue!`); document.getElementById('modal-import').classList.add('hidden'); Logic.addXP(count * 5); Dashboard.refresh();
+        alert(`Imported ${count} cards!`); document.getElementById('modal-import').classList.add('hidden'); Dashboard.refresh();
     },
     async runChapterImport() {
         const title = document.getElementById('imp-chap-title').value, tag = document.getElementById('imp-chap-tag').value, raw = document.getElementById('imp-chap-data').value;
-        if (!title || !raw) return alert("Title and Data required");
+        if (!title || !raw) return alert("Title required");
         const lines = raw.split('\n'), segments = [], delimiter = raw.indexOf('\t') !== -1 ? '\t' : ',';
         lines.forEach(line => {
             if (!line.trim()) return;
@@ -409,29 +427,51 @@ const Importer = {
             segments.push({ target, meta, native, audioBlob: null, cardId: null });
         });
         await db.chapters.add({ title, tag, segments });
-        alert(`Chapter "${title}" created!`); document.getElementById('modal-import-chapter').classList.add('hidden'); Logic.addXP(50); Library.refresh();
+        alert(`Chapter "${title}" created!`); document.getElementById('modal-import-chapter').classList.add('hidden'); Library.refresh();
     }
 };
 
 const Library = {
     async refresh() {
         const list = await db.chapters.toArray();
-        document.getElementById('chapter-list').innerHTML = list.map(c => `<div class="chapter-item" onclick="Reader.open(${c.id})"><span class="item-main">${c.title}</span><span class="item-sub">${c.segments.length} segs</span></div>`).join('');
+        document.getElementById('chapter-list').innerHTML = list.map(c => `
+            <div class="chapter-item">
+                <span class="item-main" onclick="Reader.open(${c.id})">${c.title}</span>
+                <span class="item-sub" onclick="StreamBuilder.init(${c.id}); UI.toggleOverlay('overlay-builder', true);">✎ Edit</span>
+            </div>
+        `).join('');
     }
 };
 
 const Deck = {
+    editingId: null,
     async refresh() {
         const q = document.getElementById('search-bar').value.toLowerCase();
         let list;
         if(q) list = await db.cards.filter(c => c.target.toLowerCase().includes(q) || c.native.toLowerCase().includes(q)).toArray();
         else list = await db.cards.limit(50).toArray(); 
-        document.getElementById('card-list').innerHTML = list.map(c => `<div class="card-item"><div><span class="item-main">${c.target}</span><br><span class="item-sub">${c.native}</span></div><div><button class="small-btn" onclick="Deck.delete(${c.id})">🗑</button></div></div>`).join('');
+        document.getElementById('card-list').innerHTML = list.map(c => `
+            <div class="card-item">
+                <div><span class="item-main">${c.target}</span><br><span class="item-sub">${c.native}</span></div>
+                <div>
+                    <button class="small-btn" onclick="Deck.edit(${c.id})">✎</button>
+                    <button class="small-btn" onclick="Deck.delete(${c.id})">🗑</button>
+                </div>
+            </div>
+        `).join('');
     },
-    async delete(id) { if(confirm("Delete card?")) { await db.cards.delete(id); this.refresh(); Dashboard.refresh(); } }
+    async delete(id) { if(confirm("Delete card?")) { await db.cards.delete(id); this.refresh(); Dashboard.refresh(); } },
+    async edit(id) {
+        this.editingId = id;
+        const c = await db.cards.get(id);
+        document.getElementById('qa-tag').value = c.tag;
+        document.getElementById('qa-target').value = c.target;
+        document.getElementById('qa-native').value = c.native;
+        document.getElementById('qa-meta').value = c.meta;
+        document.getElementById('modal-card-title').textContent = "Edit Card";
+        document.getElementById('modal-add-card').classList.remove('hidden');
+    }
 };
-
-const Settings = { refresh() { document.getElementById('setting-xp').textContent = Logic.gamification.xp; } };
 
 const Game = {
     queue: [], round: 1, speed: 3000, timer: null, phase: 'WATCH', index: 0, score: 0,
@@ -485,9 +525,42 @@ const Game = {
     }
 };
 
+const Settings = {
+    async restore(file) {
+        if (!file) return;
+        try {
+            const zip = await JSZip.loadAsync(file);
+            const dataStr = await zip.file("database.json").async("string");
+            const data = JSON.parse(dataStr);
+            await db.transaction('rw', db.cards, db.chapters, async () => {
+                await db.cards.clear(); await db.chapters.clear();
+                await db.cards.bulkAdd(data.cards);
+                await db.chapters.bulkAdd(data.chapters);
+            });
+            alert("Restored! Reloading..."); location.reload();
+        } catch(e) { alert("Restore Failed: " + e.message); }
+    }
+}
+
 // ==========================================
-// 9. INITIALIZATION & LISTENERS
+// 10. INIT
 // ==========================================
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        if (typeof Dexie === 'undefined' || typeof JSZip === 'undefined') throw new Error("Missing Libraries!");
+        
+        db = new Dexie('FlashDeckDB_v8');
+        db.version(1).stores({ cards: '++id, type, tag, status, dueDate', chapters: '++id, title, tag', audio: '++id, cardId, segmentId' });
+
+        Logic.checkDailyReset();
+        UI.updateStats();
+        await Dashboard.refresh();
+        setupEventListeners();
+        console.log("App Ready");
+
+    } catch (e) { console.error(e); alert("Init Error: " + e.message); }
+});
+
 function setupEventListeners() {
     document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => UI.showTab(btn.dataset.target));
 
@@ -497,7 +570,7 @@ function setupEventListeners() {
     document.getElementById('btn-quit-study').onclick = () => { UI.toggleOverlay('overlay-study', false); Dashboard.refresh(); };
     document.getElementById('btn-quit-reader').onclick = () => UI.toggleOverlay('overlay-reader', false);
     document.getElementById('btn-quit-game').onclick = () => UI.toggleOverlay('view-game', false);
-    document.getElementById('btn-add-card').onclick = () => document.getElementById('modal-add-card').classList.remove('hidden');
+    document.getElementById('btn-add-card').onclick = () => { Deck.editingId = null; document.getElementById('modal-card-title').textContent="New Card"; document.getElementById('modal-add-card').classList.remove('hidden'); };
     document.getElementById('btn-qa-cancel').onclick = () => document.getElementById('modal-add-card').classList.add('hidden');
 
     // Builder
@@ -507,6 +580,12 @@ function setupEventListeners() {
     document.getElementById('btn-save-chapter').onclick = () => StreamBuilder.save();
 
     // Reader & Import
+    document.getElementById('btn-close-sheet').onclick = () => document.getElementById('reader-sheet').classList.add('hidden');
+    // Backdrop click logic
+    document.getElementById('overlay-reader').addEventListener('click', (e) => {
+        if(e.target.id === 'reader-content') document.getElementById('reader-sheet').classList.add('hidden');
+    });
+
     document.getElementById('btn-toggle-meta').onclick = () => Reader.toggleMeta();
     document.getElementById('btn-toggle-native').onclick = () => Reader.toggleNative();
     document.getElementById('btn-open-import').onclick = () => document.getElementById('modal-import').classList.remove('hidden');
@@ -523,15 +602,28 @@ function setupEventListeners() {
     document.getElementById('btn-game').onclick = () => Game.start();
     document.getElementById('btn-game-submit').onclick = () => Game.check();
 
-    // Quick Add
+    // Quick Add (Handles Edit & Create)
     document.getElementById('form-quick-add').onsubmit = async (e) => {
         e.preventDefault();
+        const payload = {
+            target: document.getElementById('qa-target').value,
+            native: document.getElementById('qa-native').value,
+            meta: document.getElementById('qa-meta').value,
+            tag: document.getElementById('qa-tag').value,
+            type: 'VOCAB', status: 'NEW', dueDate: null
+        };
         const fileInput = document.getElementById('qa-file');
-        let blob = null;
-        if(fileInput.files.length) blob = fileInput.files[0];
-        const cardId = await db.cards.add({ target: document.getElementById('qa-target').value, native: document.getElementById('qa-native').value, meta: document.getElementById('qa-meta').value, tag: document.getElementById('qa-tag').value, type: 'VOCAB', status: 'NEW', dueDate: null });
-        if(blob) await AudioService.saveAudio(blob, cardId);
-        document.getElementById('modal-add-card').classList.add('hidden'); alert("Saved!"); Dashboard.refresh(); Logic.addXP(20);
+        let blob = null; if(fileInput.files.length) blob = fileInput.files[0];
+
+        if (Deck.editingId) {
+            await db.cards.update(Deck.editingId, payload);
+            if(blob) await AudioService.saveAudio(blob, Deck.editingId);
+        } else {
+            const id = await db.cards.add(payload);
+            if(blob) await AudioService.saveAudio(blob, id);
+            Logic.addXP(20);
+        }
+        document.getElementById('modal-add-card').classList.add('hidden'); alert("Saved!"); Dashboard.refresh(); Deck.refresh();
     };
 
     // Cram
@@ -539,14 +631,14 @@ function setupEventListeners() {
         if(Logic.gamification.sparks < 50) return alert("Need 50 ⚡");
         Logic.addSparks(-50);
         document.getElementById('modal-cram-settings').classList.add('hidden');
-        StudySession.start('NEW', 50); // Fallback for cram logic
+        StudySession.start('NEW', 50); 
     };
 
     // Ratings
     document.querySelectorAll('.rate-btn').forEach(btn => btn.onclick = () => StudySession.rate(parseInt(btn.dataset.rating)));
 
     // Reset & Backup
-    document.getElementById('btn-clear-db').onclick = async () => { if(confirm("Destroy Data?")) { await Dexie.delete('FlashDeckDB_v7'); location.reload(); }};
+    document.getElementById('btn-clear-db').onclick = async () => { if(confirm("Destroy Data?")) { await Dexie.delete('FlashDeckDB_v8'); location.reload(); }};
     document.getElementById('btn-backup').onclick = async () => {
         const zip = new JSZip();
         const allCards = await db.cards.toArray();
@@ -556,38 +648,6 @@ function setupEventListeners() {
             const a = document.createElement('a'); a.href = URL.createObjectURL(content); a.download = "backup.zip"; a.click();
         });
     };
+    // Restore
+    document.getElementById('file-restore').onchange = (e) => Settings.restore(e.target.files[0]);
 }
-
-// === MAIN INIT ===
-document.addEventListener('DOMContentLoaded', async () => {
-    try {
-        if (typeof Dexie === 'undefined' || typeof JSZip === 'undefined') {
-            throw new Error("Missing Libraries! Ensure dexie.js and jszip.min.js are in your folder.");
-        }
-        
-        // INITIALIZE DATABASE HERE
-        db = new Dexie('FlashDeckDB_v7');
-        db.version(1).stores({
-            cards: '++id, type, tag, status, dueDate, interval', // Added interval for sorting
-            chapters: '++id, title, tag',
-            audio: '++id, cardId, segmentId'
-        });
-
-        // Initialize Logic
-        Logic.checkDailyReset();
-        UI.updateStats();
-        
-        // Initialize UI
-        await Dashboard.refresh();
-        setupEventListeners();
-        console.log("App Ready");
-
-    } catch (e) {
-        alert("Startup Error: " + e.message + "\n\nSee console for details.");
-        console.error(e);
-        if (e.name === 'VersionError' && confirm("Database Version Error. Reset DB?")) {
-            await Dexie.delete('FlashDeckDB_v7');
-            location.reload();
-        }
-    }
-});
