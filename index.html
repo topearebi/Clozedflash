@@ -32,15 +32,15 @@
         <section id="view-home" class="active-view">
             <div class="daily-stats-row">
                 <div class="mini-stat">
-                    <span class="ms-label">Reviewed Today</span>
+                    <span class="ms-label">Reviewed</span>
                     <span class="ms-val" id="daily-reviews">0</span>
                 </div>
                 <div class="mini-stat">
-                    <span class="ms-label">Learned Today</span>
+                    <span class="ms-label">New Cards</span>
                     <span class="ms-val" id="daily-learned">0</span>
                 </div>
                 <div class="mini-stat">
-                    <span class="ms-label">Total Mastered</span>
+                    <span class="ms-label">Mastered</span>
                     <span class="ms-val" id="total-mastered">0</span>
                 </div>
             </div>
@@ -86,11 +86,17 @@
         <section id="view-settings" class="hidden-view">
             <h2>Settings</h2>
             <div class="settings-content">
+                <button id="btn-check-voices" class="secondary-btn" style="border: 1px solid #aaa;">🔊 Check Device Voices</button>
+                
+                <hr>
+                
                 <button id="btn-backup" class="secondary-btn">Download Backup (.zip)</button>
+                
                 <label class="secondary-btn" style="display:block; text-align:center; margin-top:10px; cursor:pointer;">
                     Restore Backup (.zip)
                     <input type="file" id="file-restore" accept=".zip" hidden>
                 </label>
+
                 <hr>
                 <button id="btn-clear-db" class="danger-btn">Reset Database</button>
                 <div class="info-block">
@@ -112,18 +118,22 @@
                 <span id="study-mode-badge" class="tag">Review</span>
                 <span id="study-progress">1 / 10</span>
             </div>
+            
             <div class="card-area" id="study-click-target">
                 <div id="study-tag-badge" class="tag-badge hidden">TAG</div>
+                
                 <div id="study-question">
                     <span class="hint-text" id="study-hint-label">...</span>
                     <h3 id="study-main-text">...</h3>
                     <button id="btn-show-hint" class="text-btn hidden">Show Hint</button>
                     <p id="study-sub-text" class="hidden">...</p>
                 </div>
+
                 <div id="study-cloze-area" class="hidden">
                     <input type="text" id="cloze-answer" placeholder="Type answer..." autocomplete="off">
                     <button id="btn-check-cloze" class="secondary-btn">Check</button>
                 </div>
+
                 <div id="study-answer" class="hidden">
                     <div class="divider"></div>
                     <div class="answer-box">
@@ -153,7 +163,8 @@
                 <input type="text" id="builder-tag" placeholder="Language Tag">
             </div>
             <div id="builder-stream" class="stream-container">
-                </div>
+                <div class="empty-state">Add sentences below to build your story.</div>
+            </div>
             <div class="builder-dock">
                 <div class="dock-inputs">
                     <input type="text" id="dock-target" placeholder="Target text...">
@@ -230,6 +241,7 @@
                     <textarea id="qa-target" placeholder="Target" required></textarea>
                     <input type="text" id="qa-meta" placeholder="Meta/Pinyin">
                     <textarea id="qa-native" placeholder="Native" required></textarea>
+                    
                     <div class="audio-control-row">
                         <button type="button" id="btn-qa-record" class="secondary-btn">🎤 Record</button>
                         <label class="secondary-btn" style="text-align:center; cursor:pointer;">
@@ -237,6 +249,7 @@
                         </label>
                     </div>
                     <span id="qa-audio-status" class="small-text" style="display:block; margin-bottom:10px;">No audio</span>
+
                     <div class="modal-actions">
                         <button type="button" id="btn-qa-cancel" class="secondary-btn">Cancel</button>
                         <button type="submit" class="primary-btn">Save</button>
@@ -273,7 +286,8 @@
         
         <div id="modal-cram-settings" class="modal hidden">
             <div class="modal-content">
-                <button id="btn-close-cram" class="close-modal-x">✖</button> <h3>Cram Mode</h3>
+                <button id="btn-close-cram" class="close-modal-x">✖</button>
+                <h3>Cram Mode</h3>
                 <p class="small-text">Cost: <span style="color:#e17055;">50 ⚡</span></p>
                 <label class="small-text" style="display:block; margin-top:10px;">Filter by Tag:</label>
                 <select id="cram-tag-select" style="width:100%; padding:10px; margin:5px 0 15px 0;">
@@ -288,6 +302,16 @@
                     <button id="btn-cancel-cram" class="secondary-btn">Cancel</button>
                     <button id="btn-start-cram" class="primary-btn cram-btn">Start</button>
                 </div>
+            </div>
+        </div>
+
+        <div id="modal-voices" class="modal hidden">
+            <div class="modal-content" style="max-width: 500px; max-height: 80vh; display: flex; flex-direction: column;">
+                <h3>Available Voices</h3>
+                <p class="small-text">These are installed on <b>this device</b>. Use the <b>Code</b> as your Tag.</p>
+                <div id="voice-list-container" style="flex: 1; overflow-y: auto; border: 1px solid #eee; margin: 10px 0; padding: 5px;">
+                    </div>
+                <button id="btn-close-voices" class="secondary-btn">Close</button>
             </div>
         </div>
 
