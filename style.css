@@ -14,7 +14,7 @@
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg); margin: 0; overflow: hidden; }
 .app-container { width: 100vw; height: 100vh; display: flex; flex-direction: column; background: var(--card-bg); max-width: 100%; }
 
-/* HEADER */
+/* HEADER & XP BAR */
 header { height: 50px; padding: 0 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #fff; z-index: 10; }
 .header-stats { display: flex; gap: 8px; align-items: center; }
 .xp-container { display: flex; flex-direction: column; width: 80px; }
@@ -80,7 +80,6 @@ section.active-view { display: block; }
 /* BUILDER STREAM */
 .builder-meta { padding: 10px; border-bottom: 1px solid #eee; display: flex; gap: 5px; }
 .stream-container { flex: 1; background: #f9f9f9; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-/* Bug Fix #3: Segment interactivity */
 .segment-bubble { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #ddd; position: relative; cursor: pointer; transition: background 0.2s;}
 .segment-bubble:hover { background: #f0f0f0; }
 .segment-target { font-weight: bold; padding-right: 25px; }
