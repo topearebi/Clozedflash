@@ -14,7 +14,7 @@
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg); margin: 0; overflow: hidden; }
 .app-container { width: 100vw; height: 100vh; display: flex; flex-direction: column; background: var(--card-bg); max-width: 100%; }
 
-/* HEADER & XP BAR */
+/* HEADER */
 header { height: 50px; padding: 0 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #fff; z-index: 10; }
 .header-stats { display: flex; gap: 8px; align-items: center; }
 .xp-container { display: flex; flex-direction: column; width: 80px; }
@@ -58,6 +58,7 @@ section.active-view { display: block; }
 .file-btn { display: inline-flex; align-items: center; justify-content: center; width: 50px; background: #eee; border-radius: 4px; cursor: pointer; font-size: 1.2rem; }
 .toggle-icon { background: #eee; border:none; padding:5px 10px; border-radius:15px; font-size:0.8rem; cursor:pointer; }
 .toggle-icon.active { background: var(--primary); color:white; }
+.close-modal-x { position: absolute; top: 10px; right: 10px; background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #888; }
 
 /* BOTTOM NAV */
 .bottom-nav { height: var(--nav-height); border-top: 1px solid #ddd; background: #fff; display: flex; justify-content: space-around; align-items: center; position: fixed; bottom: 0; width: 100%; z-index: 100; }
@@ -69,7 +70,7 @@ section.active-view { display: block; }
 .overlay-header { height: 50px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; padding: 0 15px; }
 .hidden { display: none !important; }
 
-/* STUDY MODE (Bug Fix #8: Click area) */
+/* STUDY MODE */
 .card-area { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 20px; text-align: center; overflow-y: auto; cursor: pointer; }
 #study-main-text, #game-card-content h2 { font-size: 1.8rem; margin: 20px 0; }
 .rating-buttons { display: flex; width: 100%; gap: 5px; margin-top: auto; padding-bottom: 20px; }
@@ -79,10 +80,14 @@ section.active-view { display: block; }
 /* BUILDER STREAM */
 .builder-meta { padding: 10px; border-bottom: 1px solid #eee; display: flex; gap: 5px; }
 .stream-container { flex: 1; background: #f9f9f9; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-.segment-bubble { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #ddd; position: relative; }
-.segment-target { font-weight: bold; }
+/* Bug Fix #3: Segment interactivity */
+.segment-bubble { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #ddd; position: relative; cursor: pointer; transition: background 0.2s;}
+.segment-bubble:hover { background: #f0f0f0; }
+.segment-target { font-weight: bold; padding-right: 25px; }
 .segment-native { color: #666; font-size: 0.9rem; }
-.segment-audio-icon { position: absolute; right: 10px; top: 10px; }
+.segment-audio-icon { position: absolute; right: 10px; top: 10px; font-size: 0.8rem; }
+.segment-delete-btn { position: absolute; right: 5px; bottom: 5px; background: none; border: none; font-size: 1rem; cursor: pointer; color: #ff6b6b; z-index: 5;}
+
 .builder-dock { border-top: 1px solid #ddd; padding: 10px; background: #fff; }
 .dock-inputs { display: flex; flex-direction: column; gap: 5px; margin-bottom: 5px; }
 .dock-inputs input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
@@ -91,6 +96,12 @@ section.active-view { display: block; }
 .record-btn.recording { background: var(--danger); color: white; animation: pulse 1s infinite; }
 
 /* READER */
+.reader-header-content { display: flex; flex-direction: column; align-items: flex-end; }
+.reader-legend { font-size: 0.6rem; color: #888; display: flex; gap: 8px; margin-top: 2px;}
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 2px; }
+.legend-dot.green { background: var(--success); }
+.legend-dot.grey { background: #eee; border: 1px solid #ccc; }
+
 .reader-body { padding: 20px; line-height: 1.8; font-size: 1.2rem; flex: 1; overflow-y: auto; }
 .reader-segment { padding: 2px 4px; border-radius: 4px; cursor: pointer; transition: background 0.2s; display: inline-block; }
 .reader-segment:hover { background: #eee; }
@@ -99,15 +110,15 @@ section.active-view { display: block; }
 .reader-segment.playing { background: #fff9db; }
 .reader-toggles { display: flex; gap: 5px; }
 
-/* SHEET & MODAL (Bug Fix #1: Close Button) */
+/* MODALS */
 .bottom-sheet { position: absolute; bottom: 0; width: 100%; background: white; border-top: 1px solid #ddd; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); padding: 20px; box-sizing: border-box; animation: slideUp 0.3s; z-index: 300; }
 .sheet-close-btn { position: absolute; top: 10px; right: 10px; background: none; border: none; font-size: 1.2rem; cursor: pointer; }
 .sheet-actions { display: flex; gap: 10px; margin-top: 15px; }
 .modal { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:300; display:flex; justify-content:center; align-items:center; }
-.modal-content { background:white; padding:20px; border-radius:10px; width:90%; max-width:350px; }
+.modal-content { background:white; padding:20px; border-radius:10px; width:90%; max-width:350px; position: relative; }
 .audio-control-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 0.8rem; color: #666;}
 
-/* GAME */
+/* GAME SPECIFIC */
 .game-card { padding: 20px; border: 2px dashed #eee; border-radius: 10px; margin-bottom: 20px; transition: all 0.2s; }
 .game-actions { display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; }
 #game-input-area input { text-align: center; border: 2px solid #ddd; }
@@ -119,3 +130,6 @@ section.active-view { display: block; }
 input, textarea, select { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
 .small-text { font-size: 0.8rem; color: #666; margin-top: 0; }
 .tiny-text { font-size: 0.7rem; color: #888; margin-top: -5px; }
+.toggle-container { display: flex; gap: 10px; margin-bottom: 15px; }
+.toggle-btn { flex: 1; padding: 8px; border: 1px solid #ddd; background: white; cursor: pointer; }
+.toggle-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
