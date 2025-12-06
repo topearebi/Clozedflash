@@ -1,0 +1,131 @@
+Here is the comprehensive **Product Requirement & Architecture Document (PRD)** for FlashDeck v7.
+
+This document serves as the "State of the Union." It details exactly how the application functions right now, the logic behind the features, and identifies areas where we are using "Stop-Gap" solutions versus "Ideal" architecture.
+
+---
+
+# 📱 FlashDeck v7: Product Architecture & Logic
+
+**Product Vision:** A privacy-focused, local-first language learning platform designed for polyglots. It bridges the gap between **Retention** (Flashcards) and **Consumption** (Reading/Audio), utilizing a polymorphic engine that adapts to both Alphabetic (Western) and Character-based (Asian) languages.
+
+---
+
+## 1. Technical Architecture
+
+### 1.1 Stack & Infrastructure
+* **Core:** Single Page Application (SPA) using HTML5, CSS3, Vanilla JavaScript.
+* **Database:** **IndexedDB** (via Dexie.js wrapper).
+    * *Why:* Unlike `localStorage` (5MB limit, strings only), IndexedDB handles large binary files (Audio Blobs) and structured data relationships necessary for the "Chapter" feature.
+* **Hosting:** GitHub Pages (Static hosting).
+* **Offline Policy:** 100% Offline capable. No server calls are made for logic or storage.
+
+### 1.2 The "Local-First" Logic
+* **Data Integrity:** We enforce relationships (e.g., A Chapter Segment links to a Card ID) via application logic services (`AudioService`, `Logic` modules), mimicking a backend API structure within the frontend.
+* **Persistence:** Data survives browser restarts but is cleared if the user wipes "Site Data."
+
+---
+
+## 2. Data Logic & Schema
+
+### 2.1 The Polymorphic Card Model
+The system uses a single data structure that changes behavior based on content.
+
+* **Logic:** The `isCJK()` regex function detects Chinese/Japanese/Korean characters.
+* **Field Mapping:**
+    * `target`: The word/sentence.
+    * `native`: The translation.
+    * `meta`: *Polymorphic Field*.
+        * If CJK $\rightarrow$ Acts as **Pinyin/Reading**.
+        * If Western $\rightarrow$ Acts as **Notes/Gender**.
+    * `type`:
+        * **VOCAB:** Tokenizer splits by character (CJK) or space (Western).
+        * **SENTENCE:** Triggers Cloze deletion logic.
+
+### 2.2 The "Drip Feed" Queue System
+To prevent user burnout after bulk imports.
+
+* **Status States:**
+    * `NEW`: Dormant. Hidden from daily reviews.
+    * `ACTIVE`: Inside the Spaced Repetition System (SRS).
+    * `LEECH`: Failed >5 times.
+* **Logic:** Users import 100 cards $\rightarrow$ All marked `NEW`. Dashboard shows "New Cards Waiting." User clicks "Learn +10" $\rightarrow$ System flips 10 cards to `ACTIVE` and sets `dueDate = Now`.
+
+---
+
+## 3. Core Feature Logic
+
+### 3.1 Audio Engine (The Hybrid Model)
+We support three input methods with a fallback priority system.
+
+* **Implementation:**
+    1.  **Recording:** Uses `MediaRecorder` API to capture `audio/webm`.
+    2.  **Upload:** Standard File Input.
+    3.  **Storage:** Blobs are stored in a dedicated `audio` table in IndexedDB, linked by `cardId` or `segmentId`.
+* **Playback Logic:**
+    * *Check:* Does a Blob exist for this ID?
+    * *If Yes:* Generate `URL.createObjectURL(blob)` and play.
+    * *If No:* Fallback to **Web Speech API (TTS)**. Auto-detect language code (`zh-CN` or `en-US`) based on text content.
+
+### 3.2 The Study Session (SRS)
+* **Algorithm:** Modified SM-2 (SuperMemo 2).
+* **Dynamic Re-Queueing:**
+    * If user rates "Again" (Fail), the card is **pushed to the end** of the *current* session queue. It is not removed until passed.
+* **Sticky Cloze (Sentence Intelligence):**
+    * *Problem:* User fails a long sentence because of *one* specific word.
+    * *Solution:* We store `lockedIndex` in the card data. Next review, the app *forces* that specific word to be the hidden cloze, preventing the user from getting an "easy pass" on a different random word.
+
+### 3.3 The Reader Mode (Consumption)
+* **Structure:** Chapters are stored as ordered arrays of `segments`.
+* **The Heatmap (Visual Progress):**
+    * *Implementation (Stop-Gap):* When a chapter loads, the app iterates through every segment. It queries the `cards` table to see if `segment.target` matches any existing card `target`.
+    * *Visuals:*
+        * **Grey:** No match (Unknown).
+        * **Green:** Match found (`ACTIVE` card).
+* **Toggles:** Global switches to hide `Meta` (Pinyin) or `Native` (English) columns for active recall reading.
+
+### 3.4 The Stream Builder (Input)
+* **Logic:** A chat-interface that forces "Sentence-by-Sentence" entry.
+* **Why:** Ensures perfect alignment between Target, Audio, and Native data. Prevents the "misaligned spreadsheet" issue common in bulk imports.
+
+---
+
+## 4. Gamification (The Economy)
+
+A self-contained economy loop to drive retention.
+
+* **Currency (Sparks ⚡):**
+    * **Source:** Speed Round (+10 per round) and Daily Login (+50).
+    * **Sink:** Cram Mode (Cost: 50).
+* **Infinite Speed Round:**
+    * *Formula:* $Speed = \max(250, 3000 \times 0.8^{(Round-1)})$.
+    * *Shuffling:* Uses Fisher-Yates shuffle *every round*. Prevents users from memorizing the order of cards; they must recognize the content.
+* **Stats:** Daily "Reviews Done" and "New Cards Learned" counters reset at midnight based on local system time.
+
+---
+
+## 5. Review of "Stop-Gaps" vs. Ideal Solutions
+
+These are current implementation choices made for simplicity/cost that might need refactoring in a v8 or Commercial build.
+
+| Feature | Current Implementation (Stop-Gap) | Ideal / Future Solution |
+| :--- | :--- | :--- |
+| **Backup** | **Manual Zip:** User downloads a zip file. If they lose their device without backing up, data is lost. | **Cloud Sync:** Using PouchDB/CouchDB or a remote SQL database to sync across devices automatically. |
+| **Heatmap** | **Runtime Lookup:** We check for word matches every time the chapter loads. Slow on huge libraries. | **Indexed Relationships:** Store the `cardId` directly on the segment at import time, or maintain a "Known Words" hash map. |
+| **Audio** | **IndexedDB Blobs:** Stored in browser cache. Browser may purge this if disk space is low. | **Cloud Storage:** AWS S3 or Supabase Storage bucket for permanent asset hosting. |
+| **Matching** | **Exact String Match:** "Cat" matches "Cat". "Cats" does not match. | **Lemmatization:** AI or NLP library to map "Cats/Cat/Catted" to a single root word lemma. |
+| **Tokenizer** | **Regex Split:** Simple splitting by punctuation/space. Fails on complex Mandarin compound words. | **Segmenter Library:** Use `Intl.Segmenter` (modern browser API) or a library like `jieba-js` for accurate Chinese word boundaries. |
+
+---
+
+## 6. What is Missing? (From your previous list)
+
+These are features we identified but have not yet fully implemented or polished in v7:
+
+1.  **Manual Mastery in Reader:**
+    * *Requirement:* Clicking a grey word in Reader Mode and setting it to "Green" without creating a flashcard (e.g., for words like "London" or "John" that you don't need to study).
+2.  **Edit Audio:**
+    * *Requirement:* The ability to re-record audio on an *existing* card without deleting and re-adding it.
+3.  **Reverse Cramming:**
+    * *Requirement:* Specifically filtering Cram Mode for "Hard Cards Only" (Leeches). Currently, Cram Mode is random shuffling.
+
+This document represents the app as it stands today. It is a fully functional, self-contained learning environment.
