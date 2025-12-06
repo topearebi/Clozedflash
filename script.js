@@ -1,9 +1,9 @@
 // ==========================================
-// 1. DATABASE (Dexie)
+// 1. GLOBAL VARIABLES
 // ==========================================
-// We initialize this in the init block to handle missing library errors gracefully, 
-// but we define the variable here.
-let db;
+// We declare db here so it is globally accessible, 
+// but we initialize it later in the Init block.
+let db; 
 
 // ==========================================
 // 2. LOGIC & GAMIFICATION
@@ -27,7 +27,7 @@ const Logic = {
         if (last !== today) {
             const yesterday = new Date(Date.now() - 86400000).toDateString();
             if (last !== yesterday && last !== null) this.gamification.streak = 0;
-            if (last !== today) { this.addSparks(50); alert("Daily Bonus! +50 ⚡"); }
+            if (last !== today) { this.addSparks(50); } // Silent bonus
             this.gamification.lastStudyDate = today;
         }
         this.saveState();
@@ -162,6 +162,7 @@ const UI = {
 // ==========================================
 const Dashboard = {
     async refresh() {
+        if (!db) return; // Safety check
         const now = Date.now();
         const dueCount = await db.cards.where('dueDate').belowOrEqual(now).count();
         const newCount = await db.cards.where('status').equals('NEW').count();
@@ -204,7 +205,9 @@ const StudySession = {
         } else if (mode === 'NEW') {
             this.queue = await db.cards.where('status').equals('NEW').limit(batchSize).toArray();
             this.queue.forEach(c => c.status = 'ACTIVE');
-        }
+        } 
+        // Cram mode logic populates queue externally
+        
         if (this.queue.length === 0) return alert("Nothing to study!");
         UI.toggleOverlay('overlay-study', true);
         this.loadNext();
@@ -296,7 +299,7 @@ const StudySession = {
 // ==========================================
 const StreamBuilder = {
     segments: [], tempBlob: null,
-    init() { this.segments = []; document.getElementById('builder-stream').innerHTML = '<div class="empty-state">Start adding...</div>'; },
+    init() { this.segments = []; document.getElementById('builder-stream').innerHTML = '<div class="empty-state">Start adding...</div>'; document.getElementById('builder-title').value = '';},
     async toggleRecord() { 
         const btn = document.getElementById('btn-record');
         if (btn.classList.contains('recording')) { 
@@ -319,7 +322,8 @@ const StreamBuilder = {
         this.tempBlob = null; document.getElementById('dock-target').value = ''; document.getElementById('file-status').classList.add('hidden');
     },
     async save() {
-        await db.chapters.add({ title: document.getElementById('builder-title').value, tag: document.getElementById('builder-tag').value, segments: this.segments });
+        const title = document.getElementById('builder-title').value || "Untitled";
+        await db.chapters.add({ title: title, tag: document.getElementById('builder-tag').value, segments: this.segments });
         alert("Saved!"); UI.toggleOverlay('overlay-builder', false); Library.refresh();
         Logic.addXP(50);
     }
@@ -392,7 +396,7 @@ const Importer = {
             await db.cards.add({ type, target, meta, native, tag, status: 'NEW', dueDate: null, interval: 0, lapses: 0 });
             count++;
         }
-        alert(`Imported ${count} cards!`); document.getElementById('modal-import').classList.add('hidden'); Logic.addXP(count * 5); Dashboard.refresh();
+        alert(`Imported ${count} cards to New Queue!`); document.getElementById('modal-import').classList.add('hidden'); Logic.addXP(count * 5); Dashboard.refresh();
     },
     async runChapterImport() {
         const title = document.getElementById('imp-chap-title').value, tag = document.getElementById('imp-chap-tag').value, raw = document.getElementById('imp-chap-data').value;
@@ -482,7 +486,7 @@ const Game = {
 };
 
 // ==========================================
-// 10. INITIALIZATION & LISTENERS
+// 9. INITIALIZATION & LISTENERS
 // ==========================================
 function setupEventListeners() {
     document.querySelectorAll('.nav-item').forEach(btn => btn.onclick = () => UI.showTab(btn.dataset.target));
@@ -561,10 +565,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw new Error("Missing Libraries! Ensure dexie.js and jszip.min.js are in your folder.");
         }
         
+        // INITIALIZE DATABASE HERE
+        db = new Dexie('FlashDeckDB_v7');
+        db.version(1).stores({
+            cards: '++id, type, tag, status, dueDate, interval', // Added interval for sorting
+            chapters: '++id, title, tag',
+            audio: '++id, cardId, segmentId'
+        });
+
+        // Initialize Logic
         Logic.checkDailyReset();
         UI.updateStats();
         
-        // Wait for DB to be ready
+        // Initialize UI
         await Dashboard.refresh();
         setupEventListeners();
         console.log("App Ready");
@@ -572,7 +585,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) {
         alert("Startup Error: " + e.message + "\n\nSee console for details.");
         console.error(e);
-        // DB Version Mismatch Fallback
         if (e.name === 'VersionError' && confirm("Database Version Error. Reset DB?")) {
             await Dexie.delete('FlashDeckDB_v7');
             location.reload();
