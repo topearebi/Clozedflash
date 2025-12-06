@@ -2,11 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>FlashDeck v7</title>
     <link rel="stylesheet" href="style.css">
+    
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <script src="script.js" defer></script>
 </head>
 <body>
 
@@ -72,7 +75,7 @@
                 </div>
             </div>
             <div class="search-row">
-                <input type="text" id="search-bar" placeholder="Search cards...">
+                <input type="text" id="search-bar" placeholder="Search cards by text...">
             </div>
             <div id="card-list" class="scroll-list"></div>
         </section>
@@ -81,11 +84,11 @@
             <h2>Settings</h2>
             <div class="settings-content">
                 <button id="btn-open-import" class="secondary-btn">Bulk Import Cards</button>
-                <button id="btn-backup" class="secondary-btn">Download Full Backup (.zip)</button>
+                <button id="btn-backup" class="secondary-btn">Download Full Backup (.json)</button>
                 <button id="btn-clear-db" class="danger-btn">Reset Database</button>
                 <div class="info-block">
                     <p><strong>XP Progress:</strong> <span id="setting-xp">0</span> XP</p>
-                    <p class="small-text">Data stored locally in IndexedDB.</p>
+                    <p class="small-text">Data stored locally in IndexedDB. Works offline.</p>
                 </div>
             </div>
         </section>
@@ -161,6 +164,37 @@
             </div>
         </div>
 
+        <div id="overlay-builder" class="overlay hidden">
+            <div class="overlay-header">
+                <button id="btn-quit-builder" class="text-btn">Cancel</button>
+                <span>New Chapter</span>
+                <button id="btn-save-chapter" class="primary-btn small-btn">Save</button>
+            </div>
+            <div class="builder-meta">
+                <input type="text" id="builder-title" placeholder="Chapter Title">
+                <input type="text" id="builder-tag" placeholder="Language Tag">
+            </div>
+            <div id="builder-stream" class="stream-container">
+                <div class="empty-state">Add sentences below to build your story.</div>
+            </div>
+            <div class="builder-dock">
+                <div class="dock-inputs">
+                    <input type="text" id="dock-target" placeholder="Target text...">
+                    <input type="text" id="dock-native" placeholder="Translation...">
+                    <input type="text" id="dock-meta" placeholder="Meta/Pinyin (Opt)">
+                </div>
+                <div class="dock-controls">
+                    <button id="btn-record" class="record-btn">🎤</button>
+                    <label class="file-btn">
+                        📁 <input type="file" id="dock-file" accept="audio/*" hidden>
+                    </label>
+                    <button id="btn-add-segment" class="primary-btn">⬆ Add</button>
+                </div>
+                <div id="recording-status" class="hidden">Recording... (Tap to stop)</div>
+                <div id="file-status" class="hidden small-text">File selected</div>
+            </div>
+        </div>
+
         <div id="overlay-reader" class="overlay hidden">
             <div class="overlay-header">
                 <button id="btn-quit-reader" class="text-btn">Close</button>
@@ -170,6 +204,9 @@
                 </div>
             </div>
             <div id="reader-content" class="reader-body"></div>
+            <div id="reader-controls" style="padding:10px; border-top:1px solid #eee; display:flex; gap:10px;">
+                <button id="btn-reader-play" class="primary-btn">🔊 Play All</button>
+            </div>
             <div id="reader-sheet" class="bottom-sheet hidden">
                 <div class="sheet-content">
                     <h3 id="sheet-target">Target</h3>
@@ -182,24 +219,45 @@
             </div>
         </div>
 
-        <div id="overlay-builder" class="overlay hidden">
-             <div class="overlay-header"><button id="btn-quit-builder" class="text-btn">Close</button><span>Builder</span><button id="btn-save-chapter" class="primary-btn small-btn">Save</button></div>
-             <div class="builder-meta"><input id="builder-title" placeholder="Title"><input id="builder-tag" placeholder="Tag"></div>
-             <div id="builder-stream" class="stream-container"></div>
-             <div class="builder-dock">
-                 <div class="dock-inputs"><input id="dock-target" placeholder="Target"><input id="dock-native" placeholder="Native"><input id="dock-meta" placeholder="Meta"></div>
-                 <div class="dock-controls"><button id="btn-record" class="record-btn">🎤</button><button id="btn-add-segment" class="primary-btn">Add</button></div>
-                 <div id="recording-status" class="hidden">Recording...</div>
-             </div>
+        <div id="view-game" class="overlay hidden">
+            <div class="overlay-header">
+                <button id="btn-quit-game" class="text-btn">Quit</button>
+                <span id="game-status" style="font-weight:bold; color: #6c5ce7;">Round 1</span>
+            </div>
+            <div class="card-area">
+                <div id="game-tag-badge" class="tag-badge hidden">TAG</div>
+                <div id="game-card-content" class="game-card"></div>
+                <div id="game-input-area" class="hidden">
+                    <input type="text" id="game-input" placeholder="Type meaning..." autocomplete="off">
+                    <div class="game-actions">
+                        <button id="btn-game-submit" class="secondary-btn">Submit</button>
+                        <button id="btn-game-override" class="text-btn hidden">I was right (Override)</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="modal-add-card" class="modal hidden">
             <div class="modal-content">
-                <h3>Add Card</h3>
+                <h3>Card Details</h3>
                 <form id="form-quick-add">
-                    <input id="qa-tag" placeholder="Tag"><textarea id="qa-target" placeholder="Target" required></textarea><input id="qa-meta" placeholder="Meta"><textarea id="qa-native" placeholder="Native" required></textarea>
-                    <div class="audio-control-row"><button type="button" id="btn-qa-record" class="secondary-btn">🎤</button> <input type="file" id="qa-file" hidden></div>
-                    <div class="modal-actions"><button type="button" id="btn-qa-cancel" class="secondary-btn">Cancel</button><button type="submit" class="primary-btn">Save</button></div>
+                    <input type="text" id="qa-tag" placeholder="Tag (e.g. Mandarin)">
+                    <textarea id="qa-target" placeholder="Target" required></textarea>
+                    <input type="text" id="qa-meta" placeholder="Meta/Pinyin">
+                    <textarea id="qa-native" placeholder="Native" required></textarea>
+                    
+                    <div class="audio-control-row">
+                        <button type="button" id="btn-qa-record" class="secondary-btn">🎤 Record</button>
+                        <label class="secondary-btn" style="text-align:center; cursor:pointer;">
+                            📁 Upload <input type="file" id="qa-file" accept="audio/*" hidden>
+                        </label>
+                    </div>
+                    <span id="qa-audio-status" class="small-text" style="display:block; margin-bottom:10px;">No audio</span>
+
+                    <div class="modal-actions">
+                        <button type="button" id="btn-qa-cancel" class="secondary-btn">Cancel</button>
+                        <button type="submit" class="primary-btn">Save</button>
+                    </div>
                 </form>
             </div>
         </div>
@@ -207,13 +265,22 @@
         <div id="modal-cram-settings" class="modal hidden">
             <div class="modal-content">
                 <h3>Cram Mode</h3>
-                <p>Cost: 50 ⚡</p>
-                <select id="cram-tag-select"><option value="ALL">All</option></select>
-                <div class="modal-actions"><button id="btn-cancel-cram" class="secondary-btn">Cancel</button><button id="btn-start-cram" class="primary-btn cram-btn">Start</button></div>
+                <p class="small-text">Cost: <span style="color:#e17055;">50 ⚡</span></p>
+                <select id="cram-tag-select" style="width:100%; padding:10px; margin:10px 0;">
+                    <option value="ALL">All Tags</option>
+                </select>
+                <div class="toggle-container" style="margin-bottom:20px;">
+                    <button id="cram-type-mix" class="toggle-btn active">Mix</button>
+                    <button id="cram-type-vocab" class="toggle-btn">Words</button>
+                    <button id="cram-type-sentence" class="toggle-btn">Sentences</button>
+                </div>
+                <div class="modal-actions">
+                    <button id="btn-cancel-cram" class="secondary-btn">Cancel</button>
+                    <button id="btn-start-cram" class="primary-btn cram-btn">Start</button>
+                </div>
             </div>
         </div>
 
     </div>
-    <script src="script.js"></script>
 </body>
 </html>
