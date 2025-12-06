@@ -4,7 +4,6 @@ let db;
 // 1. LOGIC & GAMIFICATION
 // ==========================================
 const Logic = {
-    // Bug Fix #6: Default sparks to 0 or 50 max
     gamification: JSON.parse(localStorage.getItem('fd9_gamification')) || { streak: 0, lastStudyDate: null, xp: 0, level: 1, sparks: 50 },
     dailyStats: JSON.parse(localStorage.getItem('fd9_daily')) || { date: new Date().toDateString(), reviews: 0, learned: 0 },
 
@@ -16,16 +15,13 @@ const Logic = {
 
     checkDailyReset() {
         const today = new Date().toDateString();
-        // Reset daily counters if date changed
         if (this.dailyStats.date !== today) {
             this.dailyStats = { date: today, reviews: 0, learned: 0 };
         }
-        
         const last = this.gamification.lastStudyDate;
         if (last !== today) {
             const yesterday = new Date(Date.now() - 86400000).toDateString();
             if (last !== yesterday && last !== null) this.gamification.streak = 0;
-            // Bonus only if it's a return visit
             if (last !== null) { this.addSparks(50); alert("Daily Bonus! +50 ⚡"); }
             this.gamification.lastStudyDate = today;
         }
@@ -52,13 +48,32 @@ const Logic = {
         }
         if (type === 'LEARN') { 
             this.dailyStats.learned++; 
-            // XP for learning is now handled here, NOT in import
             this.addXP(20); 
         }
         this.saveState();
     },
 
     isCJK(text) { return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/.test(text); },
+
+    // NEW: Smart Language Mapper
+    getLangCode(userTag) {
+        if (!userTag) return 'en-US';
+        const t = userTag.trim();
+        // Check for raw code (e.g. "fr-CA")
+        if (/^[a-z]{2,3}(-[A-Z0-9]{2,})?$/i.test(t)) return t; 
+        
+        const lower = t.toLowerCase();
+        if (lower.includes('cn') || lower.includes('mandarin')) return 'zh-CN';
+        if (lower.includes('fr') || lower.includes('french')) return 'fr-FR';
+        if (lower.includes('es') || lower.includes('spanish')) return 'es-ES';
+        if (lower.includes('de') || lower.includes('german')) return 'de-DE';
+        if (lower.includes('jp') || lower.includes('japanese')) return 'ja-JP';
+        if (lower.includes('kr') || lower.includes('korean')) return 'ko-KR';
+        if (lower.includes('ru') || lower.includes('russian')) return 'ru-RU';
+        if (lower.includes('it') || lower.includes('italian')) return 'it-IT';
+        if (lower.includes('pt') || lower.includes('portuguese')) return 'pt-BR';
+        return 'en-US';
+    },
 
     calculateNextReview(card, rating) {
         let nextInterval = 0;
@@ -77,7 +92,7 @@ const Logic = {
 };
 
 // ==========================================
-// 2. AUDIO SERVICE
+// 2. AUDIO SERVICE & VOICE BROWSER
 // ==========================================
 const AudioService = {
     recorder: null, chunks: [],
@@ -110,7 +125,7 @@ const AudioService = {
         });
     },
 
-    async play(blobOrText) {
+    async play(blobOrText, userTag = null) {
         if (!blobOrText) return;
         if (blobOrText instanceof Blob) {
             const url = URL.createObjectURL(blobOrText);
@@ -118,7 +133,10 @@ const AudioService = {
             audio.play();
         } else if (typeof blobOrText === 'string') {
             const u = new SpeechSynthesisUtterance(blobOrText);
-            u.lang = Logic.isCJK(blobOrText) ? 'zh-CN' : 'en-US';
+            // Smart Lang selection
+            let code = Logic.getLangCode(userTag);
+            if (code === 'en-US' && Logic.isCJK(blobOrText)) code = 'zh-CN';
+            u.lang = code;
             window.speechSynthesis.speak(u);
         }
     },
@@ -132,6 +150,29 @@ const AudioService = {
     async getAudioForCard(cardId) {
         const record = await db.audio.where('cardId').equals(cardId).first();
         return record ? record.blob : null;
+    }
+};
+
+const VoiceBrowser = {
+    init() { window.speechSynthesis.getVoices(); }, // Warm up
+    open() {
+        const modal = document.getElementById('modal-voices');
+        const container = document.getElementById('voice-list-container');
+        modal.classList.remove('hidden');
+        container.innerHTML = 'Loading...';
+        
+        setTimeout(() => {
+            let voices = window.speechSynthesis.getVoices();
+            if (voices.length === 0) { container.innerHTML = '<p>No voices found.</p>'; return; }
+            voices.sort((a,b) => a.lang.localeCompare(b.lang));
+            
+            let html = '<table style="width:100%; font-size:0.8rem; border-collapse: collapse;"><tr><th style="text-align:left">Lang</th><th style="text-align:left">Name</th><th>Code</th></tr>';
+            voices.forEach(v => {
+                html += `<tr style="border-bottom:1px solid #eee"><td style="padding:4px">${v.lang}</td><td style="padding:4px">${v.name.substring(0,25)}</td><td style="padding:4px; font-family:monospace; font-weight:bold">${v.lang}</td></tr>`;
+            });
+            html += '</table>';
+            container.innerHTML = html;
+        }, 500);
     }
 };
 
@@ -167,7 +208,6 @@ const UI = {
         const el = document.getElementById(id);
         if (show) el.classList.remove('hidden'); else el.classList.add('hidden');
     },
-    // Bug Fix #5: Populate Cram Tags
     async populateCramTags() {
         const uniqueTags = await db.cards.orderBy('tag').uniqueKeys();
         const select = document.getElementById('cram-tag-select');
@@ -189,9 +229,8 @@ const Dashboard = {
         const now = Date.now();
         const dueCount = await db.cards.where('dueDate').belowOrEqual(now).count();
         const newCount = await db.cards.where('status').equals('NEW').count();
-        
-        // Bug Fix #4: Correct Mastered Logic
         const masteredCount = await db.cards.where('interval').above(21).count();
+
         document.getElementById('total-mastered').textContent = masteredCount;
         
         const box = document.querySelector('.stats-box');
@@ -278,7 +317,6 @@ const StudySession = {
         this.current.tempIndex = index;
         const answer = words[index];
         words[index] = "___";
-        
         document.getElementById('study-main-text').textContent = words.join(isChinese ? '' : ' ');
         document.getElementById('study-click-target').onclick = null;
         
@@ -286,7 +324,6 @@ const StudySession = {
         const input = document.getElementById('cloze-answer');
         input.value = ''; input.focus();
         
-        // Bug Fix #9: Enter key support
         input.onkeyup = (e) => { if(e.key === 'Enter') this.checkCloze(input, answer); };
         document.getElementById('btn-check-cloze').onclick = () => this.checkCloze(input, answer);
     },
@@ -306,7 +343,7 @@ const StudySession = {
         
         // Audio on Back
         const audioBlob = await AudioService.getAudioForCard(this.current.id);
-        document.getElementById('btn-play-audio').onclick = () => AudioService.play(audioBlob || this.current.target);
+        document.getElementById('btn-play-audio').onclick = () => AudioService.play(audioBlob || this.current.target, this.current.tag);
     },
     async rate(rating) {
         if (this.current.type === 'SENTENCE' && rating === 0) this.current.lockedIndex = this.current.tempIndex;
@@ -319,9 +356,6 @@ const StudySession = {
     }
 };
 
-// ==========================================
-// 7. STREAM BUILDER (Reactive)
-// ==========================================
 const StreamBuilder = {
     segments: [], tempBlob: null, editingId: null,
     
@@ -332,10 +366,12 @@ const StreamBuilder = {
             const chap = await db.chapters.get(chapterId);
             document.getElementById('builder-title').value = chap.title;
             document.getElementById('builder-tag').value = chap.tag;
+            document.getElementById('builder-header-title').textContent = "Edit Chapter";
             this.segments = chap.segments;
         } else {
             document.getElementById('builder-title').value = '';
             document.getElementById('builder-tag').value = '';
+            document.getElementById('builder-header-title').textContent = "New Chapter";
         }
         this.renderStream();
     },
@@ -357,19 +393,16 @@ const StreamBuilder = {
                 ${seg.audioBlob ? '<span class="segment-audio-icon">🔊</span>' : ''}
                 <button class="segment-delete-btn">🗑</button>
             `;
-            // Delete Logic
             div.querySelector('.segment-delete-btn').onclick = (e) => {
                 e.stopPropagation();
                 this.segments.splice(index, 1);
                 this.renderStream();
             };
-            // Edit Logic (Load back to dock)
             div.onclick = () => {
                 document.getElementById('dock-target').value = seg.target;
                 document.getElementById('dock-native').value = seg.native;
                 document.getElementById('dock-meta').value = seg.meta;
                 this.tempBlob = seg.audioBlob;
-                // Remove from list so we can re-add (Edit flow)
                 this.segments.splice(index, 1);
                 this.renderStream();
             };
@@ -413,9 +446,6 @@ const StreamBuilder = {
     }
 };
 
-// ==========================================
-// 8. READER, IMPORTER, DECK, SETTINGS
-// ==========================================
 const Reader = {
     currentChapter: null, showMeta: true, showNative: true,
     async open(chapterId) {
@@ -441,13 +471,13 @@ const Reader = {
         document.getElementById('btn-reader-play').onclick = () => this.playAll();
     },
     async playAll() {
-        for (const seg of this.currentChapter.segments) { await AudioService.play(seg.audioBlob || seg.target); await new Promise(r => setTimeout(r, 2000)); }
+        for (const seg of this.currentChapter.segments) { await AudioService.play(seg.audioBlob || seg.target, this.currentChapter.tag); await new Promise(r => setTimeout(r, 2000)); }
     },
     openSheet(seg, index) {
         document.getElementById('reader-sheet').classList.remove('hidden');
         document.getElementById('sheet-target').textContent = seg.target;
         document.getElementById('sheet-native').textContent = seg.native;
-        document.getElementById('btn-sheet-play').onclick = () => AudioService.play(seg.audioBlob || seg.target);
+        document.getElementById('btn-sheet-play').onclick = () => AudioService.play(seg.audioBlob || seg.target, this.currentChapter.tag);
         const btnPromote = document.getElementById('btn-sheet-promote');
         if (seg.cardId) { btnPromote.textContent = "✓ Already in Deck"; btnPromote.disabled = true; }
         else { btnPromote.textContent = "Promote to Card"; btnPromote.disabled = false; btnPromote.onclick = () => this.promote(seg, index); }
@@ -458,7 +488,6 @@ const Reader = {
         this.currentChapter.segments[index].cardId = cardId;
         await db.chapters.put(this.currentChapter);
         alert("Promoted!"); this.renderText(); document.getElementById('reader-sheet').classList.add('hidden'); 
-        // Bug Fix #11: Promoting manually = learning effort = XP ok? Let's say no, only reviewing gives XP.
     }
 };
 
@@ -510,7 +539,6 @@ const Library = {
             </div>
         `).join('');
     },
-    // Bug Fix #2: Delete Chapter
     async delete(id) {
         if(confirm("Delete Chapter?")) { await db.chapters.delete(id); this.refresh(); }
     }
@@ -543,17 +571,12 @@ const Deck = {
         document.getElementById('qa-meta').value = c.meta;
         document.getElementById('modal-card-title').textContent = "Edit Card";
         document.getElementById('modal-add-card').classList.remove('hidden');
-    },
-    // Bug Fix #5: Auto-populate tags for Cram Mode
-    async getUniqueTags() {
-        return await db.cards.orderBy('tag').uniqueKeys();
     }
 };
 
 const Settings = { 
     refresh() { document.getElementById('setting-xp').textContent = Logic.gamification.xp; },
     
-    // Bug Fix #4: Restore Logic
     async restore(file) {
         if(!file) return;
         try {
@@ -636,6 +659,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         UI.updateStats();
         await Dashboard.refresh();
         setupEventListeners();
+        VoiceBrowser.init();
         console.log("App Ready");
 
     } catch (e) { console.error(e); alert("Init Error: " + e.message); }
@@ -700,7 +724,6 @@ function setupEventListeners() {
         } else {
             const id = await db.cards.add(payload);
             if(blob) await AudioService.saveAudio(blob, id);
-            // Bug Fix #11: Removed XP from adding
         }
         document.getElementById('modal-add-card').classList.add('hidden'); alert("Saved!"); Dashboard.refresh(); Deck.refresh();
     };
@@ -713,14 +736,14 @@ function setupEventListeners() {
         StudySession.start('NEW', 50); 
     };
     
-    // Bug Fix #1: Close Cram Button
+    // Cram Close Logic
     document.getElementById('btn-close-cram').onclick = () => document.getElementById('modal-cram-settings').classList.add('hidden');
     document.getElementById('btn-cancel-cram').onclick = () => document.getElementById('modal-cram-settings').classList.add('hidden');
 
     // Ratings
     document.querySelectorAll('.rate-btn').forEach(btn => btn.onclick = () => StudySession.rate(parseInt(btn.dataset.rating)));
 
-    // Reset & Backup
+    // Settings
     document.getElementById('btn-clear-db').onclick = async () => { if(confirm("Destroy Data?")) { await Dexie.delete('FlashDeckDB_v9'); location.reload(); }};
     document.getElementById('btn-backup').onclick = async () => {
         const zip = new JSZip();
@@ -731,6 +754,7 @@ function setupEventListeners() {
             const a = document.createElement('a'); a.href = URL.createObjectURL(content); a.download = "backup.zip"; a.click();
         });
     };
-    // Bug Fix #4: Restore Listener
     document.getElementById('file-restore').onchange = (e) => Settings.restore(e.target.files[0]);
+    document.getElementById('btn-check-voices').onclick = () => VoiceBrowser.open();
+    document.getElementById('btn-close-voices').onclick = () => document.getElementById('modal-voices').classList.add('hidden');
 }
