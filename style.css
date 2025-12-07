@@ -2,30 +2,34 @@
    1. GLOBAL VARIABLES & RESET
    ========================================= */
 :root {
-    /* Color Palette */
+    /* Core Palette */
     --primary-color: #2563eb;       /* Royal Blue */
     --primary-hover: #1d4ed8;
     --secondary-color: #64748b;     /* Slate Grey */
-    --bg-color: #f8fafc;            /* Light Grey/White */
+    --bg-color: #f8fafc;            /* Light/White Background */
     --card-bg: #ffffff;
     --text-main: #1e293b;           /* Dark Slate */
     --text-muted: #94a3b8;
     
-    /* Functional Colors */
-    --danger: #ef4444;              /* Red */
-    --warning: #f59e0b;             /* Amber */
-    --success: #22c55e;             /* Green */
-    --info: #0ea5e9;                /* Sky Blue */
+    /* Functional Status Colors */
+    --danger: #ef4444;              /* Red (Delete/Fail) */
+    --warning: #f59e0b;             /* Amber (Meta/Hard/Mastered) */
+    --success: #22c55e;             /* Green (New/Good/Success) */
+    --info: #0ea5e9;                /* Sky Blue (Easy) */
 
-    /* Spacing & Borders */
+    /* Layout & Spacing */
     --border-radius: 12px;
     --border-color: #e2e8f0;
+    --container-width: 1000px;
+    --nav-height: 70px;
 }
 
+/* Reset */
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
+    /* System Font Stack for Offline Performance */
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -35,7 +39,7 @@ body {
     display: flex;
     flex-direction: column;
     height: 100vh; /* Full viewport height */
-    overflow: hidden; /* Prevent body scroll, handle inside container */
+    overflow: hidden; /* Prevent body scroll, handle inside main container */
 }
 
 /* Utilities */
@@ -43,12 +47,14 @@ body {
 .text-muted { color: var(--text-muted); }
 .text-danger { color: var(--danger); }
 .text-primary { color: var(--primary-color); }
+
 .center-container {
     display: flex;
     justify-content: center;
     align-items: center;
     height: 100%;
     min-height: 50vh;
+    flex-direction: column;
 }
 
 /* =========================================
@@ -56,12 +62,14 @@ body {
    ========================================= */
 .navbar {
     background: var(--card-bg);
-    padding: 1rem 2rem;
+    height: var(--nav-height);
+    padding: 0 2rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
     border-bottom: 1px solid var(--border-color);
-    flex-shrink: 0; /* Don't shrink */
+    flex-shrink: 0; /* Prevent shrinking */
+    z-index: 100;
 }
 
 .logo {
@@ -91,18 +99,19 @@ body {
 }
 
 /* =========================================
-   3. MAIN LAYOUT & VIEWS
+   3. MAIN LAYOUT & VIEW ANIMATION
    ========================================= */
 #app-container {
     flex: 1;
     padding: 2rem;
-    max-width: 1000px; /* Optimal reading width */
+    max-width: var(--container-width);
     margin: 0 auto;
     width: 100%;
     overflow-y: auto; /* Scrollable content area */
+    -webkit-overflow-scrolling: touch; /* Smooth scroll on iOS */
 }
 
-/* View Switching Animation */
+/* Fade In Animation for View Switching */
 .view {
     display: none;
     animation: fadeIn 0.3s ease;
@@ -121,13 +130,16 @@ body {
     margin-bottom: 2rem;
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 1rem;
 }
 
 .section-header h1 { font-size: 1.8rem; }
 
 /* =========================================
-   4. COMPONENTS (Buttons, Inputs, Cards)
+   4. COMPONENT LIBRARY (Buttons, Inputs, Cards)
    ========================================= */
+/* Buttons */
 .btn {
     padding: 0.75rem 1.5rem;
     border: none;
@@ -139,6 +151,7 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    text-decoration: none;
 }
 
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -156,12 +169,20 @@ body {
 
 .btn-small { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
 .btn-large { padding: 1rem 2rem; font-size: 1.1rem; }
-.btn-text { background: none; color: var(--secondary-color); padding: 0; }
+
+.btn-text { 
+    background: none; 
+    color: var(--secondary-color); 
+    padding: 0; 
+    font-weight: bold;
+    font-size: 0.9rem;
+}
 .btn-text:hover { color: var(--primary-color); }
 
+/* Cards & Grids */
 .card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 1rem;
 }
 
@@ -188,6 +209,7 @@ body {
     color: var(--text-main);
 }
 
+/* Inputs */
 input[type="text"], input[type="file"] {
     padding: 0.75rem;
     border: 2px solid var(--border-color);
@@ -199,13 +221,14 @@ input[type="text"], input[type="file"] {
 input:focus { outline: none; border-color: var(--primary-color); }
 
 /* =========================================
-   5. DASHBOARD & SETTINGS
+   5. SETTINGS & IMPORT
    ========================================= */
 .empty-state {
     text-align: center;
     color: var(--text-muted);
     font-style: italic;
     margin-top: 3rem;
+    width: 100%;
 }
 
 .settings-group {
@@ -238,7 +261,12 @@ input:focus { outline: none; border-color: var(--primary-color); }
     background-color: var(--primary-color);
     transition: width 0.2s ease;
 }
-#progress-text { font-size: 0.8rem; text-align: center; margin-top: 0.5rem; color: var(--text-muted); }
+#progress-text { 
+    font-size: 0.8rem; 
+    text-align: center; 
+    margin-top: 0.5rem; 
+    color: var(--text-muted); 
+}
 
 /* =========================================
    6. STREAM BUILDER (CHAT UI)
@@ -250,10 +278,14 @@ input:focus { outline: none; border-color: var(--primary-color); }
     padding-bottom: 1rem;
     border-bottom: 1px solid var(--border-color);
     margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
+/* Chat History Container */
 #stream-history {
-    height: calc(100vh - 300px); /* Fill available space */
+    height: calc(100vh - 350px); /* Fill available space adjusting for Dock */
+    min-height: 300px;
     overflow-y: auto;
     padding: 1rem;
     display: flex;
@@ -273,24 +305,26 @@ input:focus { outline: none; border-color: var(--primary-color); }
     box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     max-width: 95%;
     align-self: flex-start;
-    border-left: 5px solid transparent;
+    position: relative;
+    border-left: 5px solid transparent; /* Status Indicator */
 }
 
-/* Status Indicators */
-.status-story-only { border-left-color: var(--secondary-color); }
-.status-study { border-left-color: var(--primary-color); }
-.status-mastered { border-left-color: var(--warning); } /* Gold/Amber */
+/* Status Color Coding [cite: 270-272] */
+.status-story-only { border-left-color: var(--secondary-color); } /* Grey */
+.status-study { border-left-color: var(--primary-color); }        /* Blue */
+.status-mastered { border-left-color: var(--warning); }           /* Gold/Amber */
+.status-new { border-left-color: var(--success); }                /* Green */
 
-.bubble-target { font-size: 1.2rem; font-weight: 600; margin: 0.25rem 0; }
-.bubble-meta { font-size: 0.85rem; color: var(--warning); }
+.bubble-target { font-size: 1.2rem; font-weight: 600; margin: 0.25rem 0; color: var(--text-main); }
+.bubble-meta { font-size: 0.85rem; color: var(--warning); font-weight: 500; }
 .bubble-native { font-size: 1rem; color: var(--secondary-color); font-style: italic; }
 .bubble-actions { margin-top: 0.5rem; text-align: right; }
 
-/* Toggles */
+/* Toggles [cite: 129-130] */
 .hide-meta .bubble-meta { display: none; }
 .hide-native .bubble-native { display: none; }
 
-/* Dock */
+/* Input Dock [cite: 78, 125, 259] */
 .input-dock {
     margin-top: 1rem;
     background: white;
@@ -300,6 +334,7 @@ input:focus { outline: none; border-color: var(--primary-color); }
     display: flex;
     gap: 1rem;
     border: 1px solid var(--border-color);
+    align-items: flex-start;
 }
 .dock-inputs { flex: 1; display: flex; flex-direction: column; gap: 0.5rem; }
 
@@ -326,6 +361,7 @@ input:focus { outline: none; border-color: var(--primary-color); }
 .meta-text { font-size: 1.1rem; color: var(--warning); font-family: monospace; }
 .desc-text { font-size: 0.9rem; color: var(--text-muted); font-style: italic; margin-top: 1rem; }
 
+/* Audio Indicator */
 .audio-indicator {
     margin-top: 1.5rem;
     font-size: 0.85rem;
@@ -345,6 +381,7 @@ input:focus { outline: none; border-color: var(--primary-color); }
    ========================================= */
 .score-board { font-size: 1.5rem; font-weight: 800; color: var(--primary-color); }
 
+/* Timer Bar [cite: 104, 135] */
 .timer-container {
     width: 100%;
     height: 8px;
@@ -358,10 +395,10 @@ input:focus { outline: none; border-color: var(--primary-color); }
     height: 100%;
     background: var(--danger);
     width: 100%;
-    /* Transition handled by JS interval, but CSS smoothing helps */
-    transition: width 0.1s linear;
+    transition: width 0.1s linear; /* Smooth decay */
 }
 
+/* Input Area */
 .test-input-area { width: 100%; max-width: 500px; margin: 0 auto; }
 .test-input-area input { 
     text-align: center; 
@@ -370,7 +407,7 @@ input:focus { outline: none; border-color: var(--primary-color); }
     box-shadow: 0 2px 5px rgba(0,0,0,0.05);
 }
 
-/* Shake Animation for Wrong Answers */
+/* Sticky Cloze / Incorrect Shake Animation */
 .shake {
     animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
 }
@@ -382,11 +419,28 @@ input:focus { outline: none; border-color: var(--primary-color); }
     40%, 60% { transform: translate3d(4px, 0, 0); }
 }
 
-/* Responsive Tweaks */
+/* =========================================
+   9. RESPONSIVE MEDIA QUERIES
+   ========================================= */
 @media (max-width: 600px) {
-    .navbar { padding: 1rem; }
+    /* Navbar tweaks */
+    .navbar { padding: 0 1rem; }
+    .nav-links { gap: 1rem; }
+    .nav-links a { font-size: 0.85rem; }
+
+    /* Layout tweaks */
     #app-container { padding: 1rem; }
+    
+    /* Font resizing */
     .flashcard-front h1 { font-size: 1.8rem; }
-    .grid-4 { grid-template-columns: 1fr 1fr; } /* 2x2 on mobile */
+    
+    /* Control Grids */
+    .grid-4 { grid-template-columns: 1fr 1fr; } /* Stack buttons 2x2 */
+    
+    /* Stream Builder */
     .input-dock { flex-direction: column; }
+    .btn-dock-submit { width: 100%; }
+    
+    /* Test Mode */
+    .test-input-area input { font-size: 1rem; }
 }
