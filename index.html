@@ -3,15 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Clozeflash: A local-first, decentralized language learning application using Spaced Repetition.">
     <title>Clozeflash | Local-First Language Learning</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <nav class="navbar">
+    <nav class="navbar" role="navigation">
         <div class="logo">Clozeflash</div>
         <ul class="nav-links">
             <li><a href="#" data-target="dashboard-section" class="active">Dashboard</a></li>
+            <li><a href="#" data-target="collections-section">Collections</a></li>
             <li><a href="#" data-target="read-section">Stories</a></li>
             <li><a href="#" data-target="settings-section">Settings</a></li>
         </ul>
@@ -39,10 +41,21 @@
                 </div>
             </div>
 
-            <div class="action-bar" style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center;">
+            <div class="action-bar" style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
                 <button class="btn btn-primary btn-large" id="btn-learn-all">Learn Due Cards</button>
                 <button class="btn btn-secondary btn-large" id="btn-test-all">Arcade Test</button>
             </div>
+        </section>
+
+        <section id="collections-section" class="view hidden">
+            <header class="section-header">
+                <h1>Your Collections</h1>
+                <button class="btn btn-small" id="btn-manual-collection">+ New Collection</button>
+            </header>
+            
+            <div id="collection-list" class="card-grid">
+                </div>
+            <p id="no-collections-msg" class="empty-state hidden">No collections found. Import a file to get started.</p>
         </section>
 
         <section id="read-section" class="view hidden">
@@ -60,10 +73,10 @@
             <div id="stream-builder-view" class="hidden">
                 <header class="stream-header">
                     <button class="btn-text" id="btn-back-stories">← Back</button>
-                    <h2 id="active-story-title" style="margin: 0 1rem; font-size: 1.1rem;">Untitled Story</h2>
+                    <h2 id="active-story-title" style="margin: 0 1rem; font-size: 1.1rem; flex: 1; text-align: center;">Untitled Story</h2>
                     <div class="toggles">
-                        <label style="margin-right: 0.5rem;"><input type="checkbox" id="toggle-meta" checked> Meta</label>
-                        <label><input type="checkbox" id="toggle-native" checked> Native</label>
+                        <label style="margin-right: 0.5rem; font-size: 0.9rem;"><input type="checkbox" id="toggle-meta" checked> Meta</label>
+                        <label style="font-size: 0.9rem;"><input type="checkbox" id="toggle-native" checked> Native</label>
                     </div>
                 </header>
 
