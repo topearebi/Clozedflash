@@ -1,320 +1,201 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FlashDeck v9</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clozeflash - Local-First Language Learning</title>
     <link rel="stylesheet" href="style.css">
-    
-    <script src="dexie.js"></script>
-    <script src="jszip.min.js"></script>
-    
-    <script src="script.js" defer></script>
 </head>
 <body>
 
-    <div class="app-container">
+    <nav class="navbar">
+        <div class="logo">Clozeflash</div>
+        <ul class="nav-links">
+            <li><a href="#" data-target="dashboard-section" class="active">Dashboard</a></li>
+            <li><a href="#" data-target="collections-section">Collections</a></li>
+            <li><a href="#" data-target="read-section">Read</a></li>
+            <li><a href="#" data-target="settings-section">Settings</a></li>
+        </ul>
+    </nav>
+
+    <main id="app-container">
         
-        <header>
-            <div class="brand">
-                <h1>FlashDeck</h1>
-            </div>
-            <div class="header-stats">
-                <div class="xp-container">
-                    <span class="level-badge" id="header-level">Lvl 1</span>
-                    <div class="xp-bar-bg"><div class="xp-bar-fill" id="header-xp-bar" style="width:0%"></div></div>
-                </div>
-                <div class="stat-pill" title="Streak">🔥 <span id="header-streak">0</span></div>
-                <div class="currency-display" title="Sparks">⚡ <span id="header-sparks">0</span></div>
-            </div>
-        </header>
-
-        <section id="view-home" class="active-view">
-            <div class="daily-stats-row">
-                <div class="mini-stat">
-                    <span class="ms-label">Reviewed</span>
-                    <span class="ms-val" id="daily-reviews">0</span>
-                </div>
-                <div class="mini-stat">
-                    <span class="ms-label">New Cards</span>
-                    <span class="ms-val" id="daily-learned">0</span>
-                </div>
-                <div class="mini-stat">
-                    <span class="ms-label">Mastered</span>
-                    <span class="ms-val" id="total-mastered">0</span>
-                </div>
-            </div>
-
-            <div class="stats-box">
-                <h2 id="status-heading">Loading...</h2>
-                <div class="big-number" id="dashboard-count">0</div>
-                <div class="action-row">
-                    <button id="btn-action-main" class="primary-btn">Loading...</button> 
-                    <button id="btn-game" class="secondary-btn game-btn">Speed Round <span class="cost-tag">+Earn</span></button>
-                </div>
-            </div>
+        <section id="dashboard-section" class="view active">
+            <header class="section-header">
+                <h1>Dashboard</h1>
+            </header>
             
-            <div class="section-title"><h3>Recent Activity</h3></div>
-            <div id="home-activity-list" class="simple-list"></div>
-        </section>
-
-        <section id="view-read" class="hidden-view">
-            <div class="nav-bar">
-                <h2>Library</h2>
-                <div class="nav-actions">
-                    <button id="btn-import-chapter" class="secondary-btn small-btn">Import Text</button>
-                    <button id="btn-new-chapter" class="primary-btn small-btn">+ New</button>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Cards</h3>
+                    <p id="stat-total-cards">0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Due for Review</h3>
+                    <p id="stat-due-cards">0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Mastered</h3>
+                    <p id="stat-mastered">0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Streak</h3>
+                    <p id="stat-streak">0 Days</p>
                 </div>
             </div>
-            <div id="chapter-list" class="scroll-list"></div>
-        </section>
 
-        <section id="view-browse" class="hidden-view">
-            <div class="nav-bar">
-                <h2>My Cards</h2>
-                <div class="nav-actions">
-                    <button id="btn-open-import" class="secondary-btn small-btn" style="margin-right:5px;">Import</button>
-                    <button id="btn-add-card" class="fab-mini">+</button>
-                </div>
-            </div>
-            <div class="search-row">
-                <input type="text" id="search-bar" placeholder="Search cards...">
-            </div>
-            <div id="card-list" class="scroll-list"></div>
-        </section>
-
-        <section id="view-settings" class="hidden-view">
-            <h2>Settings</h2>
-            <div class="settings-content">
-                <button id="btn-check-voices" class="secondary-btn" style="border: 1px solid #aaa;">🔊 Check Device Voices</button>
-                
-                <hr>
-                
-                <button id="btn-backup" class="secondary-btn">Download Backup (.zip)</button>
-                
-                <label class="secondary-btn" style="display:block; text-align:center; margin-top:10px; cursor:pointer;">
-                    Restore Backup (.zip)
-                    <input type="file" id="file-restore" accept=".zip" hidden>
-                </label>
-
-                <hr>
-                <button id="btn-clear-db" class="danger-btn">Reset Database</button>
-                <div class="info-block">
-                    <p class="small-text">Version 9.0. Local Storage Mode.</p>
-                </div>
+            <div class="action-bar">
+                <button class="btn btn-primary" id="btn-learn-all">Learn All Cards</button>
+                <button class="btn btn-secondary" id="btn-test-all">Test All Cards</button>
             </div>
         </section>
 
-        <nav class="bottom-nav">
-            <button class="nav-item active" data-target="view-home">🏠 Home</button>
-            <button class="nav-item" data-target="view-read">📖 Read</button>
-            <button class="nav-item" data-target="view-browse">🗂️ Browse</button>
-            <button class="nav-item" data-target="view-settings">⚙️ Config</button>
-        </nav>
-
-        <div id="overlay-study" class="overlay hidden">
-            <div class="overlay-header">
-                <button id="btn-quit-study" class="text-btn">Quit</button>
-                <span id="study-mode-badge" class="tag">Review</span>
-                <span id="study-progress">1 / 10</span>
+        <section id="collections-section" class="view hidden">
+            <header class="section-header">
+                <h1>Your Collections</h1>
+                <button class="btn btn-small" id="btn-new-collection">+ New Collection</button>
+            </header>
+            <div id="collection-list" class="card-grid">
+                <p class="empty-state">No collections found. Import data in Settings.</p>
             </div>
+        </section>
+
+        <section id="read-section" class="view hidden">
             
-            <div class="card-area" id="study-click-target">
-                <div id="study-tag-badge" class="tag-badge hidden">TAG</div>
-                
-                <div id="study-question">
-                    <span class="hint-text" id="study-hint-label">...</span>
-                    <h3 id="study-main-text">...</h3>
-                    <button id="btn-show-hint" class="text-btn hidden">Show Hint</button>
-                    <p id="study-sub-text" class="hidden">...</p>
+            <div id="story-list-view">
+                <header class="section-header">
+                    <h1>Storyblocks</h1>
+                    <button class="btn btn-small" id="btn-create-story">+ New Story</button>
+                </header>
+                <div id="story-list" class="card-grid">
+                    <p class="empty-state">No stories yet. Click "+ New Story" to start.</p>
                 </div>
+            </div>
 
-                <div id="study-cloze-area" class="hidden">
-                    <input type="text" id="cloze-answer" placeholder="Type answer..." autocomplete="off">
-                    <button id="btn-check-cloze" class="secondary-btn">Check</button>
-                </div>
-
-                <div id="study-answer" class="hidden">
-                    <div class="divider"></div>
-                    <div class="answer-box">
-                        <h3 id="ans-target">...</h3>
-                        <button id="btn-play-audio" class="audio-btn-small">🔊</button>
-                        <p id="ans-meta" class="meta-text">...</p>
-                        <p id="ans-native">...</p>
+            <div id="stream-builder-view" class="hidden">
+                <header class="stream-header">
+                    <button class="btn-text" id="btn-back-stories">← Back</button>
+                    <h2 id="active-story-title">Untitled Story</h2>
+                    <div class="toggles">
+                        <label><input type="checkbox" id="toggle-meta" checked> Meta</label>
+                        <label><input type="checkbox" id="toggle-native" checked> Native</label>
                     </div>
-                    <div class="rating-buttons">
-                        <button class="rate-btn" data-rating="0" style="background:#ff6b6b">Again</button>
-                        <button class="rate-btn" data-rating="1" style="background:#feca57">Hard</button>
-                        <button class="rate-btn" data-rating="2" style="background:#1dd1a1">Good</button>
-                        <button class="rate-btn" data-rating="3" style="background:#54a0ff">Easy</button>
+                </header>
+
+                <div id="stream-history"></div>
+
+                <div class="input-dock">
+                    <div class="dock-inputs">
+                        <input type="text" id="dock-target" placeholder="Target Language Sentence (Required)">
+                        <input type="text" id="dock-meta" placeholder="Meta / Pinyin">
+                        <input type="text" id="dock-native" placeholder="Native Translation">
+                    </div>
+                    <button class="btn btn-primary" id="btn-dock-submit">Add</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="study-section" class="view hidden">
+            <div id="study-setup" class="center-container">
+                <div class="stat-card" style="max-width: 400px; margin: 0 auto;">
+                    <h2>Ready to Learn?</h2>
+                    <p id="study-count-display" style="font-size: 1.2rem; margin: 1rem 0;">Checking for cards...</p>
+                    <button class="btn btn-primary btn-large" id="btn-start-session" disabled>Start Session</button>
+                </div>
+            </div>
+
+            <div id="study-active" class="hidden">
+                <header class="section-header">
+                    <button class="btn-text" onclick="location.reload()">Exit</button>
+                    <span><span id="queue-counter">0</span> remaining</span>
+                </header>
+
+                <div class="flashcard-container">
+                    <div class="flashcard-front">
+                        <h1 id="card-target">Target Text</h1>
+                    </div>
+                    <div id="card-back" class="flashcard-back hidden">
+                        <hr>
+                        <p id="card-meta" class="meta-text">Meta Info</p>
+                        <h2 id="card-native">Native Translation</h2>
+                        <p id="card-desc" class="desc-text">Description</p>
+                        <div class="audio-indicator" id="audio-status">🔊 Playing Audio...</div>
                     </div>
                 </div>
-            </div>
-        </div>
 
-        <div id="overlay-builder" class="overlay hidden">
-            <div class="overlay-header">
-                <button id="btn-quit-builder" class="text-btn">Cancel</button>
-                <span id="builder-header-title">New Chapter</span>
-                <button id="btn-save-chapter" class="primary-btn small-btn">Save</button>
-            </div>
-            <div class="builder-meta">
-                <input type="text" id="builder-title" placeholder="Chapter Title">
-                <input type="text" id="builder-tag" placeholder="Language Tag">
-            </div>
-            <div id="builder-stream" class="stream-container">
-                <div class="empty-state">Add sentences below to build your story.</div>
-            </div>
-            <div class="builder-dock">
-                <div class="dock-inputs">
-                    <input type="text" id="dock-target" placeholder="Target text...">
-                    <input type="text" id="dock-native" placeholder="Translation...">
-                    <input type="text" id="dock-meta" placeholder="Meta/Pinyin (Opt)">
-                </div>
-                <div class="dock-controls">
-                    <button id="btn-record" class="record-btn">🎤</button>
-                    <label class="file-btn">
-                        📁 <input type="file" id="dock-file" accept="audio/*" hidden>
-                    </label>
-                    <button id="btn-add-segment" class="primary-btn">⬆ Add</button>
-                </div>
-                <div id="recording-status" class="hidden">Recording... (Tap to stop)</div>
-                <div id="file-status" class="hidden small-text">File selected</div>
-            </div>
-        </div>
-
-        <div id="overlay-reader" class="overlay hidden">
-            <div class="overlay-header">
-                <button id="btn-quit-reader" class="text-btn">Close</button>
-                <div class="reader-header-content">
-                    <div class="reader-toggles">
-                        <button id="btn-toggle-meta" class="toggle-icon">Pinyin</button>
-                        <button id="btn-toggle-native" class="toggle-icon">Eng</button>
-                    </div>
-                    <div class="reader-legend">
-                        <span class="legend-dot green"></span>Known
-                        <span class="legend-dot grey"></span>New
+                <div class="study-controls">
+                    <button class="btn btn-primary btn-wide" id="btn-show-answer">Show Answer</button>
+                    <div id="grading-buttons" class="hidden grid-4">
+                        <button class="btn btn-danger" onclick="handleGrade(1)">Again</button>
+                        <button class="btn btn-warning" onclick="handleGrade(3)">Hard</button>
+                        <button class="btn btn-success" onclick="handleGrade(4)">Good</button>
+                        <button class="btn btn-info" onclick="handleGrade(5)">Easy</button>
                     </div>
                 </div>
             </div>
-            <div id="reader-content" class="reader-body"></div>
-            <div id="reader-controls" style="padding:10px; border-top:1px solid #eee; display:flex; gap:10px;">
-                <button id="btn-reader-play" class="primary-btn">🔊 Play All</button>
+        </section>
+
+        <section id="test-section" class="view hidden">
+            <div id="test-setup" class="center-container">
+                <div class="stat-card" style="max-width: 400px; margin: 0 auto;">
+                    <h2>Arcade Speed Test</h2>
+                    <p>Type the answer before time runs out!</p>
+                    <p class="text-muted">Time decreases every round.</p>
+                    <button class="btn btn-secondary btn-large" id="btn-start-test">Start Arcade</button>
+                </div>
             </div>
-            
-            <div id="reader-sheet" class="bottom-sheet hidden">
-                <button id="btn-close-sheet" class="sheet-close-btn">✖</button>
-                <div class="sheet-content">
-                    <h3 id="sheet-target">Target</h3>
-                    <p id="sheet-native">Native</p>
-                    <div class="sheet-actions">
-                        <button id="btn-sheet-play" class="secondary-btn">🔊</button>
-                        <button id="btn-sheet-promote" class="primary-btn">Promote to Card</button>
+
+            <div id="test-active" class="hidden">
+                <header class="section-header">
+                    <button class="btn-text" onclick="location.reload()">Quit</button>
+                    <div class="score-board">Score: <span id="test-score">0</span></div>
+                </header>
+
+                <div class="timer-container">
+                    <div id="timer-bar"></div>
+                </div>
+
+                <div class="flashcard-container">
+                    <div class="flashcard-front">
+                        <h2 id="test-native">Native Text</h2>
+                        <p id="test-meta" class="meta-text">Meta Hint</p>
+                    </div>
+                    <div class="test-input-area">
+                        <input type="text" id="test-input" placeholder="Type the Target Language..." autocomplete="off">
+                        <button class="btn btn-primary" id="btn-submit-test">Submit</button>
+                    </div>
+                    <div id="sticky-cloze-area" class="hidden">
+                        <p class="text-danger">Incorrect! Type the answer exactly to continue:</p>
+                        <h3 id="test-correct-answer" class="text-primary">Target Text</h3>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <div id="view-game" class="overlay hidden">
-            <div class="overlay-header">
-                <button id="btn-quit-game" class="text-btn">Quit</button>
-                <span id="game-status" style="font-weight:bold; color: #6c5ce7;">Round 1</span>
+        <section id="settings-section" class="view hidden">
+            <header class="section-header">
+                <h1>Settings</h1>
+            </header>
+            <div class="settings-group">
+                <h3>Data Management</h3>
+                <button class="btn btn-danger" id="btn-reset-db">Reset Database (Wipe Data)</button>
             </div>
-            <div class="card-area">
-                <div id="game-tag-badge" class="tag-badge hidden">TAG</div>
-                <div id="game-card-content" class="game-card"></div>
-                <div id="game-input-area" class="hidden">
-                    <input type="text" id="game-input" placeholder="Type meaning..." autocomplete="off">
-                    <div class="game-actions">
-                        <button id="btn-game-submit" class="secondary-btn">Submit</button>
-                        <button id="btn-game-override" class="text-btn hidden">I was right (Override)</button>
+
+            <div class="import-area">
+                <h3>Import Collection (TSV)</h3>
+                <p class="text-muted">Format: Target | Meta | Native | Description</p>
+                <input type="file" id="tsv-file-input" accept=".tsv,.txt,.csv">
+                <div id="progress-container" class="hidden">
+                    <div class="progress-bar-bg">
+                        <div id="progress-fill" style="width: 0%"></div>
                     </div>
+                    <p id="progress-text">Processing...</p>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <div id="modal-add-card" class="modal hidden">
-            <div class="modal-content">
-                <h3 id="modal-card-title">Card Details</h3>
-                <form id="form-quick-add">
-                    <input type="text" id="qa-tag" placeholder="Tag (e.g. Mandarin)">
-                    <textarea id="qa-target" placeholder="Target" required></textarea>
-                    <input type="text" id="qa-meta" placeholder="Meta/Pinyin">
-                    <textarea id="qa-native" placeholder="Native" required></textarea>
-                    
-                    <div class="audio-control-row">
-                        <button type="button" id="btn-qa-record" class="secondary-btn">🎤 Record</button>
-                        <label class="secondary-btn" style="text-align:center; cursor:pointer;">
-                            📁 Upload <input type="file" id="qa-file" accept="audio/*" hidden>
-                        </label>
-                    </div>
-                    <span id="qa-audio-status" class="small-text" style="display:block; margin-bottom:10px;">No audio</span>
+    </main>
 
-                    <div class="modal-actions">
-                        <button type="button" id="btn-qa-cancel" class="secondary-btn">Cancel</button>
-                        <button type="submit" class="primary-btn">Save</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div id="modal-import" class="modal hidden">
-            <div class="modal-content">
-                <h3>Import Cards</h3>
-                <p class="small-text">Target [TAB] Meta [TAB] Native</p>
-                <input type="text" id="input-bulk-tag" placeholder="Tag (e.g. French)">
-                <textarea id="input-bulk" placeholder="Paste data here..."></textarea>
-                <div class="modal-actions">
-                    <button id="btn-cancel-import" class="secondary-btn">Cancel</button>
-                    <button id="btn-run-import" class="primary-btn">Import Cards</button>
-                </div>
-            </div>
-        </div>
-
-        <div id="modal-import-chapter" class="modal hidden">
-            <div class="modal-content">
-                <h3>Import Chapter</h3>
-                <input type="text" id="imp-chap-title" placeholder="Title">
-                <input type="text" id="imp-chap-tag" placeholder="Language Tag">
-                <textarea id="imp-chap-data" placeholder="Paste text here..." style="height:150px;"></textarea>
-                <div class="modal-actions">
-                    <button id="btn-cancel-imp-chap" class="secondary-btn">Cancel</button>
-                    <button id="btn-run-imp-chap" class="primary-btn">Import</button>
-                </div>
-            </div>
-        </div>
-        
-        <div id="modal-cram-settings" class="modal hidden">
-            <div class="modal-content">
-                <button id="btn-close-cram" class="close-modal-x">✖</button>
-                <h3>Cram Mode</h3>
-                <p class="small-text">Cost: <span style="color:#e17055;">50 ⚡</span></p>
-                <label class="small-text" style="display:block; margin-top:10px;">Filter by Tag:</label>
-                <select id="cram-tag-select" style="width:100%; padding:10px; margin:5px 0 15px 0;">
-                    <option value="ALL">All Tags</option>
-                </select>
-                <div class="toggle-container" style="margin-bottom:20px;">
-                    <button id="cram-type-mix" class="toggle-btn active">Mix</button>
-                    <button id="cram-type-vocab" class="toggle-btn">Words</button>
-                    <button id="cram-type-sentence" class="toggle-btn">Sentences</button>
-                </div>
-                <div class="modal-actions">
-                    <button id="btn-cancel-cram" class="secondary-btn">Cancel</button>
-                    <button id="btn-start-cram" class="primary-btn cram-btn">Start</button>
-                </div>
-            </div>
-        </div>
-
-        <div id="modal-voices" class="modal hidden">
-            <div class="modal-content" style="max-width: 500px; max-height: 80vh; display: flex; flex-direction: column;">
-                <h3>Available Voices</h3>
-                <p class="small-text">These are installed on <b>this device</b>. Use the <b>Code</b> as your Tag.</p>
-                <div id="voice-list-container" style="flex: 1; overflow-y: auto; border: 1px solid #eee; margin: 10px 0; padding: 5px;">
-                    </div>
-                <button id="btn-close-voices" class="secondary-btn">Close</button>
-            </div>
-        </div>
-
-    </div>
+    <script src="app.js"></script>
 </body>
 </html>
