@@ -1,73 +1,168 @@
 /**
- * CLOZEFLASH - COMPLETE LOGIC
- * Features: Local-First DB, Import, Stream Builder, SM-2 Study, Arcade Test
+ * CLOZEFLASH - Local-First Language Learning Application
+ * * Architecture: Single Page Application (SPA) using IndexedDB for local storage.
+ * Logic: Relational Schema (Single Source of Truth), SM-2 Algorithm, Arcade Timer decay.
+ * * Author: Gemini (Ref: User Specs)
  */
 
+/* =========================================
+   1. GLOBAL CONSTANTS & STATE
+   ========================================= */
 const DB_NAME = 'ClozeflashDB';
 const DB_VERSION = 1;
-let db;
 
-// 1. DATABASE INIT
+// Global State
+let db;
+let activeStoryId = null;
+
+// Study Session State
+let studyQueue = [];
+let currentCard = null;
+
+// Test Session State
+let testQueue = [];
+let testScore = 0;
+let testRound = 1;
+let testTimer = null;
+let currentTestCard = null;
+let isStickyMode = false;
+
+/* =========================================
+   2. DATABASE INITIALISATION
+   ========================================= */
+
 function initDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
+
         request.onupgradeneeded = (event) => {
             db = event.target.result;
+
+            [cite_start]// Store 1: Cards (The Single Source of Truth) [cite: 162]
             if (!db.objectStoreNames.contains('cards')) {
                 const cardStore = db.createObjectStore('cards', { keyPath: 'id' });
+                [cite_start]// Index for duplicate checking [cite: 165]
                 cardStore.createIndex('target_text', 'target_text', { unique: false }); 
+                // Index for study queries
                 cardStore.createIndex('next_review', 'review_data.next_review_date', { unique: false });
             }
+
+            [cite_start]// Store 2: Collections [cite: 163]
             if (!db.objectStoreNames.contains('collections')) {
                 db.createObjectStore('collections', { keyPath: 'id' });
             }
+
+            [cite_start]// Store 3: Storyblocks [cite: 163]
             if (!db.objectStoreNames.contains('storyblocks')) {
                 db.createObjectStore('storyblocks', { keyPath: 'id' });
             }
         };
+
         request.onsuccess = (event) => {
             db = event.target.result;
-            console.log("DB Initialised");
-            updateDashboardStats();
+            console.log("Database initialised successfully.");
+            updateDashboardStats(); 
             resolve(db);
         };
-        request.onerror = (e) => reject(e);
+
+        request.onerror = (event) => {
+            console.error("Database error:", event.target.error);
+            reject(event.target.error);
+        };
     });
 }
 
-// 2. HELPERS
+/* =========================================
+   3. HELPER FUNCTIONS
+   ========================================= */
+
+// Unique ID Generator
 const generateId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-[cite_start]// SM-2 Algorithm [cite: 256]
-function calculateSM2(quality, prevInterval, prevReps, prevEase) {
-    let interval, reps, ease;
-    if (quality >= 3) {
-        if (prevReps === 0) interval = 1;
-        else if (prevReps === 1) interval = 6;
-        else interval = Math.round(prevInterval * prevEase);
-        reps = prevReps + 1;
-    } else {
-        reps = 0;
-        interval = 1;
+// View Switcher (SPA Routing)
+function switchView(targetId) {
+    document.querySelectorAll('.view').forEach(el => {
+        el.classList.remove('active');
+        el.classList.add('hidden');
+    });
+    
+    // Manage Navbar State
+    document.querySelectorAll('.nav-links a').forEach(el => el.classList.remove('active'));
+    const navLink = document.querySelector(`a[data-target="${targetId}"]`);
+    if(navLink) navLink.classList.add('active');
+
+    // Show Target
+    const targetEl = document.getElementById(targetId);
+    if (targetEl) {
+        targetEl.classList.remove('hidden');
+        targetEl.classList.add('active');
     }
-    ease = prevEase + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-    if (ease < 1.3) ease = 1.3;
-    return { interval, reps, easeFactor: ease };
 }
 
-[cite_start]// Duplicate Rule Logic [cite: 164-172]
-async function addCardToDB(target, native, meta, description, addToStudyQueue = true) {
+[cite_start]// Fisher-Yates Shuffle [cite: 259]
+function fisherYatesShuffle(array) {
+    let currentIndex = array.length, randomIndex;
+    while (currentIndex != 0) {
+        randomIndex = Math.floor(Math.random() * currentIndex);
+        currentIndex--;
+        [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+    }
+    return array;
+}
+
+[cite_start]// SM-2 Algorithm Implementation [cite: 256]
+function calculateSM2(quality, previousInterval, previousRepetitions, previousEaseFactor) {
+    let interval, repetitions, easeFactor;
+
+    if (quality >= 3) {
+        if (previousRepetitions === 0) {
+            interval = 1;
+        } else if (previousRepetitions === 1) {
+            interval = 6;
+        } else {
+            interval = Math.round(previousInterval * previousEaseFactor);
+        }
+        repetitions = previousRepetitions + 1;
+    } else {
+        repetitions = 0;
+        interval = 1;
+    }
+
+    easeFactor = previousEaseFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+    if (easeFactor < 1.3) easeFactor = 1.3;
+
+    return { interval, repetitions, easeFactor };
+}
+
+/* =========================================
+   4. CORE DB LOGIC (ADD CARD)
+   ========================================= */
+
+/**
+ * [cite_start]Adds a card or returns existing ID (Duplicate Rule). [cite: 164-172]
+ * @param {string} target - Target language text
+ * @param {string} native - Native translation
+ * @param {string} meta - Pinyin/Romaji etc
+ * @param {string} description - Notes
+ * @param {boolean} addToStudyQueue - TRUE for imports/manual, FALSE for stream builder
+ */
+function addCardToDB(target, native, meta, description, addToStudyQueue = true) {
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(['cards'], 'readwrite');
         const store = transaction.objectStore('cards');
         const index = store.index('target_text');
-        const cleanTarget = target.trim();
+        
+        const cleanTarget = target.trim(); // Case sensitive indexing by default in IDB
 
+        // We check existing first
         const request = index.get(cleanTarget);
+
         request.onsuccess = () => {
             if (request.result) {
-                resolve(request.result.id); // Return existing ID
+                // Match Found: Return existing ID. Do NOT overwrite data.
+                resolve(request.result.id);
             } else {
+                // No Match: Create New
                 const newCard = {
                     id: generateId('c'),
                     target_text: cleanTarget,
@@ -75,95 +170,170 @@ async function addCardToDB(target, native, meta, description, addToStudyQueue = 
                     meta_info: meta,
                     description: description,
                     audio_path: null,
-                    status_flags: { is_mastered: false, is_study_queue: addToStudyQueue, consecutive_correct: 0 },
-                    review_data: { next_review_date: new Date().toISOString().split('T')[0], interval: 0, ease_factor: 2.5 }
+                    status_flags: {
+                        is_mastered: false,
+                        is_study_queue: addToStudyQueue, 
+                        consecutive_correct: 0
+                    },
+                    review_data: {
+                        next_review_date: new Date().toISOString().split('T')[0], // Due Today
+                        interval: 0,
+                        ease_factor: 2.5
+                    }
                 };
                 store.add(newCard);
                 resolve(newCard.id);
             }
         };
+        request.onerror = (e) => reject(e);
     });
 }
 
-// 3. UI & NAV
-function switchView(targetId) {
-    document.querySelectorAll('.view').forEach(el => { el.classList.remove('active'); el.classList.add('hidden'); });
-    document.querySelectorAll('.nav-links a').forEach(el => el.classList.remove('active'));
-    document.getElementById(targetId).classList.remove('hidden');
-    document.getElementById(targetId).classList.add('active');
-    const navLink = document.querySelector(`a[data-target="${targetId}"]`);
-    if(navLink) navLink.classList.add('active');
-}
+/* =========================================
+   5. DASHBOARD MODULE
+   ========================================= */
 
-async function updateDashboardStats() {
+function updateDashboardStats() {
+    if (!db) return;
     const tx = db.transaction(['cards'], 'readonly');
     const store = tx.objectStore('cards');
-    store.getAll().onsuccess = (e) => {
-        const cards = e.target.result;
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+        const cards = request.result;
+        const total = cards.length;
         const today = new Date().toISOString().split('T')[0];
-        document.getElementById('stat-total-cards').textContent = cards.length;
-        document.getElementById('stat-due-cards').textContent = cards.filter(c => c.status_flags.is_study_queue && c.review_data.next_review_date <= today).length;
-        document.getElementById('stat-mastered').textContent = cards.filter(c => c.status_flags.is_mastered).length;
+        
+        // Logic: Due cards must be in study queue AND due date <= today
+        const due = cards.filter(c => 
+            c.status_flags.is_study_queue && 
+            c.review_data.next_review_date <= today
+        ).length;
+
+        const mastered = cards.filter(c => c.status_flags.is_mastered).length;
+
+        // Safely update DOM
+        const elTotal = document.getElementById('stat-total-cards');
+        const elDue = document.getElementById('stat-due-cards');
+        const elMastered = document.getElementById('stat-mastered');
+        
+        if (elTotal) elTotal.textContent = total;
+        if (elDue) elDue.textContent = due;
+        if (elMastered) elMastered.textContent = mastered;
     };
 }
 
-[cite_start]// 4. IMPORT LOGIC [cite: 221]
+/* =========================================
+   6. IMPORT MODULE (TSV)
+   ========================================= */
+
+async function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    const progressContainer = document.getElementById('progress-container');
+    const progressText = document.getElementById('progress-text');
+
+    progressContainer.classList.remove('hidden');
+    progressText.textContent = "Reading file...";
+
+    reader.onload = async (e) => {
+        const content = e.target.result;
+        await processTSV(content, file.name);
+    };
+    reader.readAsText(file);
+}
+
 async function processTSV(content, filename) {
     const lines = content.split('\n');
     const totalLines = lines.length;
-    const cardIds = [];
+    const cardIds = []; 
     const progressBar = document.getElementById('progress-fill');
     const progressText = document.getElementById('progress-text');
+
     let processedCount = 0;
 
     for (const line of lines) {
         if (!line.trim()) continue;
+
+        [cite_start]// [cite: 222] Tab Separated
         const parts = line.split('\t');
+        
+        [cite_start]// [cite: 224] Column Order: Target | Meta | Native | Description
         const target = parts[0] ? parts[0].trim() : "";
+        const meta = parts[1] ? parts[1].trim() : "";
+        const native = parts[2] ? parts[2].trim() : "";
+        const description = parts[3] ? parts[3].trim() : "";
+
         if (target) {
-            const cardId = await addCardToDB(
-                target, 
-                parts[2] ? parts[2].trim() : "", 
-                parts[1] ? parts[1].trim() : "", 
-                parts[3] ? parts[3].trim() : ""
-            );
+            [cite_start]// [cite: 164] Duplicate Rule applied here via addCardToDB
+            const cardId = await addCardToDB(target, native, meta, description, true);
             cardIds.push(cardId);
         }
+
         processedCount++;
+        
+        // Update UI every 10 items to prevent freezing
         if (processedCount % 10 === 0) {
-            progressBar.style.width = `${Math.floor((processedCount / totalLines) * 100)}%`;
+            const percentage = Math.floor((processedCount / totalLines) * 100);
+            progressBar.style.width = `${percentage}%`;
             progressText.textContent = `Processed ${processedCount} of ${totalLines}`;
-            await new Promise(r => setTimeout(r, 0));
+            await new Promise(r => setTimeout(r, 0)); 
         }
     }
 
     if (cardIds.length > 0) {
-        const name = prompt("Import complete! Name this collection:", filename.split('.')[0]);
-        if (name) {
+        const collectionName = prompt("Import complete! Name this collection:", filename.split('.')[0]);
+        if (collectionName) {
+            [cite_start]// Create Collection Reference [cite: 163]
             const tx = db.transaction(['collections'], 'readwrite');
             tx.objectStore('collections').add({
-                id: generateId('col'), name: name, card_refs: cardIds, created_at: new Date().toISOString()
+                id: generateId('col'),
+                name: collectionName,
+                card_refs: cardIds,
+                created_at: new Date().toISOString()
             });
-            alert("Success!");
-            location.reload();
+            alert("Import Successful!");
+            location.reload(); 
         }
+    } else {
+        alert("No valid cards found.");
     }
+    
+    // Reset UI
+    document.getElementById('progress-container').classList.add('hidden');
+    document.getElementById('tsv-file-input').value = ""; 
 }
 
-[cite_start]// 5. STREAM BUILDER LOGIC [cite: 230]
-let activeStoryId = null;
+/* =========================================
+   7. STREAM BUILDER MODULE
+   ========================================= */
 
+// Create New Story
 async function createNewStory() {
     const title = prompt("Enter Story Title:");
     if (!title) return;
-    const newStory = { id: generateId('sb'), title: title, segments: [] };
+
+    const newStory = {
+        id: generateId('sb'),
+        title: title,
+        collection_id: null,
+        segments: [], 
+        created_at: new Date().toISOString()
+    };
+
     const tx = db.transaction(['storyblocks'], 'readwrite');
     tx.objectStore('storyblocks').add(newStory);
+    
     tx.oncomplete = () => loadStoryIntoStream(newStory.id);
 }
 
-async function loadStoryIntoStream(storyId) {
+// Load Story
+function loadStoryIntoStream(storyId) {
     activeStoryId = storyId;
+    
+    // UI Switch
     document.getElementById('story-list-view').classList.add('hidden');
     document.getElementById('stream-builder-view').classList.remove('hidden');
     
@@ -171,97 +341,175 @@ async function loadStoryIntoStream(storyId) {
     const storyStore = tx.objectStore('storyblocks');
     const cardStore = tx.objectStore('cards');
 
-    storyStore.get(storyId).onsuccess = async (e) => {
-        const story = e.target.result;
+    const storyReq = storyStore.get(storyId);
+    
+    storyReq.onsuccess = async () => {
+        const story = storyReq.result;
         document.getElementById('active-story-title').textContent = story.title;
         const container = document.getElementById('stream-history');
-        container.innerHTML = '';
+        container.innerHTML = ''; 
+
+        // Render Segments
         for (const segment of story.segments) {
+            // Need to fetch individual card data to render bubble
             const cardReq = cardStore.get(segment.card_id);
             await new Promise(r => {
-                cardReq.onsuccess = () => { if(cardReq.result) renderBubble(cardReq.result); r(); };
+                cardReq.onsuccess = () => {
+                    if (cardReq.result) renderBubble(cardReq.result);
+                    r();
+                };
             });
         }
         container.scrollTop = container.scrollHeight;
     };
 }
 
+// Submit via Dock
 async function handleDockSubmit() {
     const targetInput = document.getElementById('dock-target');
     const metaInput = document.getElementById('dock-meta');
     const nativeInput = document.getElementById('dock-native');
     const target = targetInput.value.trim();
+
     if (!target) return;
 
-    [cite_start]// Default is_study_queue: false for stories [cite: 238]
-    const cardId = await addCardToDB(target, nativeInput.value.trim(), metaInput.value.trim(), "Stream", false);
+    [cite_start]// [cite: 238] is_study_queue = FALSE for Stream Builder
+    const cardId = await addCardToDB(
+        target, 
+        nativeInput.value.trim(), 
+        metaInput.value.trim(), 
+        "Created via Stream", 
+        false 
+    );
 
+    // Update Storyblock with new Segment
     const tx = db.transaction(['storyblocks'], 'readwrite');
     const store = tx.objectStore('storyblocks');
-    store.get(activeStoryId).onsuccess = (e) => {
-        const story = e.target.result;
-        story.segments.push({ order: story.segments.length + 1, card_id: cardId });
+    const req = store.get(activeStoryId);
+
+    req.onsuccess = () => {
+        const story = req.result;
+        story.segments.push({
+            order: story.segments.length + 1,
+            card_id: cardId
+        });
         store.put(story);
-        
+
+        // Render Bubble
         const cardTx = db.transaction(['cards'], 'readonly');
-        cardTx.objectStore('cards').get(cardId).onsuccess = (ev) => {
-            renderBubble(ev.target.result);
-            targetInput.value = ''; metaInput.value = ''; nativeInput.value = ''; targetInput.focus();
-            const c = document.getElementById('stream-history'); c.scrollTop = c.scrollHeight;
+        cardTx.objectStore('cards').get(cardId).onsuccess = (e) => {
+            renderBubble(e.target.result);
+            targetInput.value = '';
+            metaInput.value = '';
+            nativeInput.value = '';
+            targetInput.focus();
+            
+            const container = document.getElementById('stream-history');
+            container.scrollTop = container.scrollHeight;
         };
     };
 }
 
+// Render Bubble
 function renderBubble(card) {
     const container = document.getElementById('stream-history');
     const div = document.createElement('div');
-    let statusClass = card.status_flags.is_study_queue ? 'status-study' : 'status-story-only';
+    
+    let statusClass = 'status-story-only'; 
+    if (card.status_flags.is_study_queue) statusClass = 'status-study'; 
+    if (card.status_flags.is_mastered) statusClass = 'status-mastered';
+
     div.className = `bubble ${statusClass}`;
-    const promoteBtn = !card.status_flags.is_study_queue ? `<button class="btn-text btn-small" onclick="promoteCard('${card.id}', this)">+ Promote to Flashcard</button>` : `<span style="font-size:0.8rem; color:var(--primary-color)">✓ In Deck</span>`;
-    div.innerHTML = `<div class="bubble-meta">${card.meta_info||''}</div><div class="bubble-target">${card.target_text}</div><div class="bubble-native">${card.native_text||''}</div><div class="bubble-actions">${promoteBtn}</div>`;
+    
+    [cite_start]// Promote Button [cite: 241]
+    const promoteBtn = !card.status_flags.is_study_queue 
+        ? `<button class="btn-text btn-small" onclick="promoteCard('${card.id}', this)">+ Promote to Flashcard</button>` 
+        : `<span style="font-size:0.8rem; color:var(--primary-color)">✓ In Deck</span>`;
+
+    div.innerHTML = `
+        <div class="bubble-meta">${card.meta_info || ''}</div>
+        <div class="bubble-target">${card.target_text}</div>
+        <div class="bubble-native">${card.native_text || ''}</div>
+        <div class="bubble-actions">${promoteBtn}</div>
+    `;
     container.appendChild(div);
 }
 
-window.promoteCard = function(cardId, btn) {
+// Global promote function (attached to window for inline onclick)
+window.promoteCard = function(cardId, btnElement) {
     const tx = db.transaction(['cards'], 'readwrite');
-    tx.objectStore('cards').get(cardId).onsuccess = (e) => {
-        const card = e.target.result;
-        card.status_flags.is_study_queue = true;
-        tx.objectStore('cards').put(card);
-        btn.closest('.bubble').classList.add('status-study');
-        btn.outerHTML = `<span style="font-size:0.8rem; color:var(--primary-color)">✓ Promoted!</span>`;
+    const store = tx.objectStore('cards');
+    const req = store.get(cardId);
+
+    req.onsuccess = () => {
+        const card = req.result;
+        card.status_flags.is_study_queue = true; [cite_start]// [cite: 243]
+        store.put(card);
+
+        const bubble = btnElement.closest('.bubble');
+        bubble.classList.add('status-study');
+        bubble.classList.remove('status-story-only');
+        btnElement.outerHTML = `<span style="font-size:0.8rem; color:var(--primary-color)">✓ Promoted!</span>`;
     };
 };
 
 function renderStoryList() {
     const list = document.getElementById('story-list');
     list.innerHTML = '';
+    
     const tx = db.transaction(['storyblocks'], 'readonly');
-    tx.objectStore('storyblocks').getAll().onsuccess = (e) => {
-        if(e.target.result.length === 0) { list.innerHTML = '<p class="empty-state">No stories.</p>'; return; }
-        e.target.result.forEach(story => {
-            const div = document.createElement('div');
-            div.className = 'stat-card'; div.style.cursor = 'pointer';
-            div.innerHTML = `<h3>${story.title}</h3><p style="font-size:1rem;">${story.segments.length} segments</p>`;
-            div.addEventListener('click', () => loadStoryIntoStream(story.id));
-            list.appendChild(div);
+    const store = tx.objectStore('storyblocks');
+    const req = store.getAll();
+
+    req.onsuccess = () => {
+        if (req.result.length === 0) {
+            list.innerHTML = '<p class="empty-state">No stories yet.</p>';
+            return;
+        }
+        req.result.forEach(story => {
+            const card = document.createElement('div');
+            card.className = 'stat-card';
+            card.style.textAlign = 'left';
+            card.style.cursor = 'pointer';
+            card.innerHTML = `<h3>${story.title}</h3><p>${story.segments.length} segments</p>`;
+            card.addEventListener('click', () => loadStoryIntoStream(story.id));
+            list.appendChild(card);
         });
     };
 }
 
-[cite_start]// 6. STUDY LOGIC [cite: 256]
-let studyQueue = [];
-let currentCard = null;
+/* =========================================
+   8. STUDY MODULE (SM-2)
+   ========================================= */
 
 function prepareSession() {
     switchView('study-section');
-    document.getElementById('btn-start-session').disabled = true;
+    const display = document.getElementById('study-count-display');
+    const btn = document.getElementById('btn-start-session');
+    
+    display.textContent = "Loading cards...";
+    btn.disabled = true;
+
     const today = new Date().toISOString().split('T')[0];
     const tx = db.transaction(['cards'], 'readonly');
-    tx.objectStore('cards').index('next_review').getAll(IDBKeyRange.upperBound(today)).onsuccess = (e) => {
-        studyQueue = e.target.result.filter(c => c.status_flags.is_study_queue);
-        document.getElementById('study-count-display').textContent = studyQueue.length > 0 ? `Cards due: ${studyQueue.length}` : "No cards due!";
-        if(studyQueue.length > 0) document.getElementById('btn-start-session').disabled = false;
+    const store = tx.objectStore('cards');
+    const index = store.index('next_review');
+
+    // Get all cards due <= Today
+    const range = IDBKeyRange.upperBound(today);
+    const request = index.getAll(range);
+
+    request.onsuccess = () => {
+        // Filter: Must be in study queue
+        const allDue = request.result;
+        studyQueue = allDue.filter(c => c.status_flags.is_study_queue);
+
+        if (studyQueue.length > 0) {
+            display.textContent = `You have ${studyQueue.length} cards due for review today.`;
+            btn.disabled = false;
+        } else {
+            display.textContent = "No cards due! Great job.";
+        }
     };
 }
 
@@ -272,66 +520,127 @@ function startSessionUI() {
 }
 
 function loadNextCard() {
-    if(studyQueue.length === 0) { alert("Session Complete!"); switchView('dashboard-section'); updateDashboardStats(); return; }
+    if (studyQueue.length === 0) {
+        alert("Session Complete!");
+        switchView('dashboard-section');
+        updateDashboardStats();
+        return;
+    }
+
     currentCard = studyQueue[0];
     document.getElementById('queue-counter').textContent = studyQueue.length;
     document.getElementById('card-target').textContent = currentCard.target_text;
+    
+    // Reset UI State
     document.getElementById('card-back').classList.add('hidden');
     document.getElementById('btn-show-answer').classList.remove('hidden');
     document.getElementById('grading-buttons').classList.add('hidden');
+    
+    // Fill Back Data
     document.getElementById('card-native').textContent = currentCard.native_text;
     document.getElementById('card-meta').textContent = currentCard.meta_info;
     document.getElementById('card-desc').textContent = currentCard.description;
 }
 
-document.getElementById('btn-show-answer').addEventListener('click', () => {
+function revealAnswer() {
     document.getElementById('card-back').classList.remove('hidden');
     document.getElementById('btn-show-answer').classList.add('hidden');
     document.getElementById('grading-buttons').classList.remove('hidden');
     playAudio(currentCard);
-});
+}
 
+[cite_start]// [cite: 247-249] Audio Prioritization
 function playAudio(card) {
-    const ind = document.getElementById('audio-status'); ind.classList.add('playing');
-    if ('speechSynthesis' in window) {
-        const u = new SpeechSynthesisUtterance(card.target_text);
-        u.onend = () => ind.classList.remove('playing');
-        speechSynthesis.speak(u);
+    const indicator = document.getElementById('audio-status');
+    indicator.classList.add('playing');
+
+    if (card.audio_path) {
+        const audio = new Audio(card.audio_path);
+        audio.play();
+        audio.onended = () => indicator.classList.remove('playing');
+    } else {
+        if ('speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(card.target_text);
+            // Optional: Simple lang detection or setting could go here
+            speechSynthesis.speak(utterance);
+            utterance.onend = () => indicator.classList.remove('playing');
+        } else {
+            indicator.textContent = "Audio not supported";
+        }
     }
 }
 
+// Grading Logic
 window.handleGrade = function(quality) {
+    [cite_start]// 1. Re-queue logic [cite: 42]
     if (quality < 3) {
-        studyQueue.push(currentCard); studyQueue.shift();
-        currentCard.review_data.interval = 0;
-        loadNextCard(); return;
+        studyQueue.push(currentCard);
+        studyQueue.shift(); 
+        currentCard.review_data.interval = 0; // Reset interval logic for failure
+        loadNextCard(); 
+        return; 
     }
+
+    // 2. SM-2 Success Logic
     studyQueue.shift();
-    const res = calculateSM2(quality, currentCard.review_data.interval, currentCard.review_data.interval === 0 ? 0 : 1, currentCard.review_data.ease_factor);
-    currentCard.review_data.interval = res.interval;
-    currentCard.review_data.ease_factor = res.easeFactor;
-    const next = new Date(); next.setDate(next.getDate() + res.interval);
-    currentCard.review_data.next_review_date = next.toISOString().split('T')[0];
-    if(quality >= 3) currentCard.status_flags.consecutive_correct++;
-    if(currentCard.status_flags.consecutive_correct >= 5) currentCard.status_flags.is_mastered = true;
+
+    const prevData = currentCard.review_data;
+    const result = calculateSM2(
+        quality, 
+        prevData.interval, 
+        prevData.interval === 0 ? 0 : 1, 
+        prevData.ease_factor
+    );
+
+    currentCard.review_data.interval = result.interval;
+    currentCard.review_data.ease_factor = result.ease_factor;
     
+    const nextDate = new Date();
+    nextDate.setDate(nextDate.getDate() + result.interval);
+    currentCard.review_data.next_review_date = nextDate.toISOString().split('T')[0];
+
+    [cite_start]// Check Mastery [cite: 23]
+    currentCard.status_flags.consecutive_correct = 
+        quality >= 3 ? currentCard.status_flags.consecutive_correct + 1 : 0;
+    
+    if (currentCard.status_flags.consecutive_correct >= 5) {
+        currentCard.status_flags.is_mastered = true; 
+    }
+
+    // Update DB
     const tx = db.transaction(['cards'], 'readwrite');
     tx.objectStore('cards').put(currentCard);
+
     loadNextCard();
 };
 
-[cite_start]// 7. TEST LOGIC [cite: 257]
-let testQueue = [], testScore = 0, testRound = 1, testTimer = null, currentTestCard = null, isStickyMode = false;
+/* =========================================
+   9. TEST MODULE (ARCADE)
+   ========================================= */
+
+const BASE_TIME_MS = 10000; 
+const DECAY_FACTOR = 0.95;  
 
 function prepareTestSession() {
     switchView('test-section');
+    
     const tx = db.transaction(['cards'], 'readonly');
-    tx.objectStore('cards').getAll().onsuccess = (e) => {
-        const all = e.target.result.filter(c => c.status_flags.is_study_queue);
-        if(all.length < 5) { alert("Need at least 5 cards!"); switchView('dashboard-section'); return; }
-        [cite_start]// Fisher-Yates Shuffle [cite: 259]
-        for (let i = all.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [all[i], all[j]] = [all[j], all[i]]; }
-        testQueue = all; testScore = 0; testRound = 1;
+    const store = tx.objectStore('cards');
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+        // Filter: Must be in study queue (Have been seen/added)
+        const allCards = request.result.filter(c => c.status_flags.is_study_queue);
+        
+        if (allCards.length < 5) {
+            alert("Not enough cards to test! Go learn some cards first.");
+            switchView('dashboard-section');
+            return;
+        }
+
+        testQueue = fisherYatesShuffle(allCards);
+        testScore = 0;
+        testRound = 1;
         document.getElementById('test-score').textContent = 0;
     };
 }
@@ -343,65 +652,187 @@ function startTestUI() {
 }
 
 function nextTestRound() {
-    if(testQueue.length === 0) { alert(`Game Over! Score: ${testScore}`); location.reload(); return; }
+    if (testQueue.length === 0) {
+        alert(`Game Over! Final Score: ${testScore}`);
+        location.reload();
+        return;
+    }
+
     isStickyMode = false;
     currentTestCard = testQueue.pop();
+
     document.getElementById('test-native').textContent = currentTestCard.native_text;
     document.getElementById('test-meta').textContent = currentTestCard.meta_info || '???';
-    const input = document.getElementById('test-input'); input.value = ''; input.focus();
-    document.getElementById('sticky-cloze-area').classList.add('hidden');
     
-    [cite_start]// Decay Timer [cite: 258]
-    const duration = 10000 * Math.pow(0.95, testRound);
-    if(testTimer) clearInterval(testTimer);
-    let rem = duration;
-    const bar = document.getElementById('timer-bar');
-    testTimer = setInterval(() => {
-        rem -= 100; bar.style.width = `${(rem/duration)*100}%`;
-        if(rem <= 0) { clearInterval(testTimer); triggerStickyCloze(); }
-    }, 100);
+    const input = document.getElementById('test-input');
+    input.value = '';
+    input.disabled = false;
+    input.placeholder = "Type the Target Language...";
+    input.style.borderColor = '#e2e8f0'; 
+    input.focus();
+    
+    document.getElementById('sticky-cloze-area').classList.add('hidden');
+
+    [cite_start]// [cite: 257] Decay Timer
+    const duration = BASE_TIME_MS * Math.pow(DECAY_FACTOR, testRound);
+    startTimer(duration);
 }
 
-document.getElementById('btn-submit-test').addEventListener('click', handleTestSubmit);
-document.getElementById('test-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') handleTestSubmit(); });
+function startTimer(durationMs) {
+    if (testTimer) clearInterval(testTimer);
+    
+    const bar = document.getElementById('timer-bar');
+    let remaining = durationMs;
+    const interval = 100; 
+
+    bar.style.width = '100%';
+
+    testTimer = setInterval(() => {
+        remaining -= interval;
+        const pct = (remaining / durationMs) * 100;
+        bar.style.width = `${pct}%`;
+
+        if (remaining <= 0) {
+            clearInterval(testTimer);
+            [cite_start]triggerStickyCloze(); // [cite: 58] Sticky Cloze on Timeout
+        }
+    }, interval);
+}
 
 function handleTestSubmit() {
-    const val = document.getElementById('test-input').value.trim();
-    if(val.toLowerCase() === currentTestCard.target_text.trim().toLowerCase()) {
-        if(!isStickyMode) { clearInterval(testTimer); testScore++; testRound++; document.getElementById('test-score').textContent = testScore; }
-        nextTestRound();
+    const input = document.getElementById('test-input');
+    const userAns = input.value.trim();
+    const correctAns = currentTestCard.target_text.trim();
+
+    if (userAns.toLowerCase() === correctAns.toLowerCase()) {
+        // Correct
+        if (isStickyMode) {
+            nextTestRound(); // Passed stickiness, no points
+        } else {
+            clearInterval(testTimer);
+            testScore++;
+            testRound++; 
+            document.getElementById('test-score').textContent = testScore;
+            
+            input.style.borderColor = '#22c55e'; // Green
+            setTimeout(() => {
+                nextTestRound();
+            }, 500);
+        }
     } else {
-        if(!isStickyMode) { clearInterval(testTimer); triggerStickyCloze(); }
+        // Incorrect
+        if (!isStickyMode) {
+            clearInterval(testTimer);
+            triggerStickyCloze();
+        } else {
+            input.classList.add('shake'); // Optional animation class
+            setTimeout(() => input.classList.remove('shake'), 500);
+        }
     }
 }
 
 function triggerStickyCloze() {
     isStickyMode = true;
+    const input = document.getElementById('test-input');
     document.getElementById('sticky-cloze-area').classList.remove('hidden');
     document.getElementById('test-correct-answer').textContent = currentTestCard.target_text;
-    const input = document.getElementById('test-input'); input.value = ''; input.placeholder = "Type exact answer..."; input.focus();
+    
+    input.value = ''; 
+    input.placeholder = "Type the answer exactly to continue...";
+    input.focus();
+    input.style.borderColor = '#ef4444'; // Red
 }
 
-// INIT LISTENERS
+/* =========================================
+   10. INITIALISATION & LISTENERS
+   ========================================= */
+
 document.addEventListener('DOMContentLoaded', () => {
+    // 1. Init
     initDB();
-    document.querySelectorAll('.nav-links a').forEach(link => link.addEventListener('click', (e) => { e.preventDefault(); switchView(e.target.getAttribute('data-target')); }));
-    document.getElementById('btn-reset-db').addEventListener('click', () => { if(confirm("Wipe all data?")) indexedDB.deleteDatabase(DB_NAME).onsuccess = () => location.reload(); });
-    document.getElementById('btn-new-collection').addEventListener('click', () => switchView('settings-section')); // Redirect to import
-    document.getElementById('tsv-file-input').addEventListener('change', (e) => {
-        const r = new FileReader();
-        document.getElementById('progress-container').classList.remove('hidden');
-        r.onload = (ev) => processTSV(ev.target.result, e.target.files[0].name);
-        r.readAsText(e.target.files[0]);
+
+    // 2. Navigation
+    document.querySelectorAll('.nav-links a').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const target = e.target.getAttribute('data-target');
+            // If switching to Read section, load list
+            if(target === 'read-section') renderStoryList();
+            switchView(target);
+        });
     });
-    document.getElementById('btn-create-story').addEventListener('click', createNewStory);
-    document.getElementById('btn-dock-submit').addEventListener('click', handleDockSubmit);
-    document.getElementById('btn-back-stories').addEventListener('click', () => { document.getElementById('stream-builder-view').classList.add('hidden'); document.getElementById('story-list-view').classList.remove('hidden'); renderStoryList(); });
-    document.getElementById('toggle-meta').addEventListener('change', (e) => document.getElementById('stream-history').classList.toggle('hide-meta', !e.target.checked));
-    document.getElementById('toggle-native').addEventListener('change', (e) => document.getElementById('stream-history').classList.toggle('hide-native', !e.target.checked));
-    document.querySelector('a[data-target="read-section"]').addEventListener('click', renderStoryList);
+
+    // 3. Settings / Data Management
+    const resetBtn = document.getElementById('btn-reset-db');
+    if(resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            if(confirm("Are you sure? This will wipe all data permanently.")) {
+                const req = indexedDB.deleteDatabase(DB_NAME);
+                req.onsuccess = () => location.reload();
+            }
+        });
+    }
+
+    [cite_start]// Export Logic [cite: 274]
+    const exportBtn = document.getElementById('btn-export-json');
+    if(exportBtn) {
+        exportBtn.addEventListener('click', () => {
+            const tx = db.transaction(['cards', 'collections', 'storyblocks'], 'readonly');
+            Promise.all([
+                new Promise(resolve => tx.objectStore('cards').getAll().onsuccess = (e) => resolve(e.target.result)),
+                new Promise(resolve => tx.objectStore('collections').getAll().onsuccess = (e) => resolve(e.target.result)),
+                new Promise(resolve => tx.objectStore('storyblocks').getAll().onsuccess = (e) => resolve(e.target.result))
+            ]).then(([cards, collections, stories]) => {
+                const data = { cards, collections, stories };
+                const blob = new Blob([JSON.stringify(data, null, 2)], {type : 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `clozeflash_backup_${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+            });
+        });
+    }
+
+    // 4. Feature Bindings
+    const tsvInput = document.getElementById('tsv-file-input');
+    if(tsvInput) tsvInput.addEventListener('change', handleFileSelect);
+
+    const btnCreateStory = document.getElementById('btn-create-story');
+    if(btnCreateStory) btnCreateStory.addEventListener('click', createNewStory);
+
+    const btnDockSubmit = document.getElementById('btn-dock-submit');
+    if(btnDockSubmit) btnDockSubmit.addEventListener('click', handleDockSubmit);
+
+    const btnBackStories = document.getElementById('btn-back-stories');
+    if(btnBackStories) btnBackStories.addEventListener('click', () => {
+        document.getElementById('stream-builder-view').classList.add('hidden');
+        document.getElementById('story-list-view').classList.remove('hidden');
+        renderStoryList();
+    });
+
+    // Toggles
+    document.getElementById('toggle-meta').addEventListener('change', (e) => {
+        document.getElementById('stream-history').classList.toggle('hide-meta', !e.target.checked);
+    });
+    document.getElementById('toggle-native').addEventListener('change', (e) => {
+        document.getElementById('stream-history').classList.toggle('hide-native', !e.target.checked);
+    });
+
+    // Study & Test Bindings
     document.getElementById('btn-learn-all').addEventListener('click', prepareSession);
     document.getElementById('btn-start-session').addEventListener('click', startSessionUI);
+    document.getElementById('btn-show-answer').addEventListener('click', revealAnswer);
+
     document.getElementById('btn-test-all').addEventListener('click', prepareTestSession);
     document.getElementById('btn-start-test').addEventListener('click', startTestUI);
+    document.getElementById('btn-submit-test').addEventListener('click', handleTestSubmit);
+    
+    // Enter key for Test Input
+    const testInput = document.getElementById('test-input');
+    if(testInput) {
+        testInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleTestSubmit();
+        });
+    }
 });
