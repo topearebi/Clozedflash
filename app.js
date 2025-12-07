@@ -1,6 +1,7 @@
 /**
  * CLOZEFLASH - Local-First Language Learning Application
- * Cleaned App Logic
+ * Architecture: Single Page Application (SPA) using IndexedDB.
+ * Features: Relational Schema, SM-2 Spaced Repetition, Arcade Timer, Stream Builder.
  */
 
 /* =========================================
@@ -9,15 +10,17 @@
 const DB_NAME = 'ClozeflashDB';
 const DB_VERSION = 1;
 
-// Global State
+// Global Database Reference
 let db;
+
+// Module State: Stories
 let activeStoryId = null;
 
-// Study Session State
+// Module State: Study Session
 let studyQueue = [];
 let currentCard = null;
 
-// Test Session State
+// Module State: Arcade Test Session
 let testQueue = [];
 let testScore = 0;
 let testRound = 1;
@@ -36,7 +39,7 @@ function initDB() {
         request.onupgradeneeded = (event) => {
             db = event.target.result;
 
-            // Store 1: Cards (The Single Source of Truth)
+            // Store 1: Cards (Single Source of Truth)
             if (!db.objectStoreNames.contains('cards')) {
                 const cardStore = db.createObjectStore('cards', { keyPath: 'id' });
                 // Index for duplicate checking
@@ -45,12 +48,12 @@ function initDB() {
                 cardStore.createIndex('next_review', 'review_data.next_review_date', { unique: false });
             }
 
-            // Store 2: Collections
+            // Store 2: Collections (Reference Lists)
             if (!db.objectStoreNames.contains('collections')) {
                 db.createObjectStore('collections', { keyPath: 'id' });
             }
 
-            // Store 3: Storyblocks
+            // Store 3: Storyblocks (Narrative Content)
             if (!db.objectStoreNames.contains('storyblocks')) {
                 db.createObjectStore('storyblocks', { keyPath: 'id' });
             }
@@ -79,17 +82,18 @@ const generateId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString
 
 // View Switcher (SPA Routing)
 function switchView(targetId) {
+    // Hide all views
     document.querySelectorAll('.view').forEach(el => {
         el.classList.remove('active');
         el.classList.add('hidden');
     });
     
-    // Manage Navbar State
+    // Update Navigation State
     document.querySelectorAll('.nav-links a').forEach(el => el.classList.remove('active'));
     const navLink = document.querySelector(`a[data-target="${targetId}"]`);
     if(navLink) navLink.classList.add('active');
 
-    // Show Target
+    // Show Target View
     const targetEl = document.getElementById(targetId);
     if (targetEl) {
         targetEl.classList.remove('hidden');
@@ -97,7 +101,7 @@ function switchView(targetId) {
     }
 }
 
-// Fisher-Yates Shuffle
+// Fisher-Yates Shuffle Algorithm
 function fisherYatesShuffle(array) {
     let currentIndex = array.length, randomIndex;
     while (currentIndex != 0) {
@@ -108,7 +112,7 @@ function fisherYatesShuffle(array) {
     return array;
 }
 
-// SM-2 Algorithm Implementation
+// SM-2 Spaced Repetition Algorithm
 function calculateSM2(quality, previousInterval, previousRepetitions, previousEaseFactor) {
     let interval, repetitions, easeFactor;
 
@@ -150,17 +154,18 @@ function addCardToDB(target, native, meta, description, addToStudyQueue = true) 
         const store = transaction.objectStore('cards');
         const index = store.index('target_text');
         
-        const cleanTarget = target.trim(); // Case sensitive indexing by default in IDB
+        const cleanTarget = target.trim(); // IndexedDB indexing is case-sensitive by default
 
-        // We check existing first
+        // Duplicate Check
         const request = index.get(cleanTarget);
 
         request.onsuccess = () => {
             if (request.result) {
                 // Match Found: Return existing ID. Do NOT overwrite data.
+                // We do not enable study queue here automatically to preserve user intent.
                 resolve(request.result.id);
             } else {
-                // No Match: Create New
+                // No Match: Create New Card
                 const newCard = {
                     id: generateId('c'),
                     target_text: cleanTarget,
@@ -222,7 +227,99 @@ function updateDashboardStats() {
 }
 
 /* =========================================
-   6. IMPORT MODULE (TSV)
+   6. COLLECTIONS MODULE
+   ========================================= */
+
+function renderCollectionList() {
+    const container = document.getElementById('collection-list');
+    const emptyMsg = document.getElementById('no-collections-msg');
+    
+    // Clear current list
+    container.innerHTML = '';
+
+    const tx = db.transaction(['collections'], 'readonly');
+    const store = tx.objectStore('collections');
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+        const collections = request.result;
+
+        if (collections.length === 0) {
+            emptyMsg.classList.remove('hidden');
+            return;
+        }
+
+        emptyMsg.classList.add('hidden');
+
+        collections.forEach(col => {
+            const card = document.createElement('div');
+            card.className = 'stat-card';
+            card.style.textAlign = 'left'; 
+            
+            const cardCount = col.card_refs ? col.card_refs.length : 0;
+
+            card.innerHTML = `
+                <h3 style="color:var(--primary-color); font-size:1.1rem; margin-bottom:0.5rem;">${col.name}</h3>
+                <p style="font-size:0.9rem; color:var(--text-main); font-weight:normal;">${cardCount} Cards</p>
+                <div style="margin-top:1rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+                    <button class="btn btn-small btn-primary" onclick="studyCollection('${col.id}')">Learn</button>
+                    <button class="btn btn-small btn-danger" onclick="deleteCollection('${col.id}')">Delete</button>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    };
+}
+
+// Action: Learn specific collection
+window.studyCollection = function(colId) {
+    const tx = db.transaction(['collections'], 'readonly');
+    const store = tx.objectStore('collections');
+    const req = store.get(colId);
+
+    req.onsuccess = () => {
+        const col = req.result;
+        if(col && col.card_refs.length > 0) {
+            // Filter global cards by this collection's reference list
+            const cardTx = db.transaction(['cards'], 'readonly');
+            cardTx.objectStore('cards').getAll().onsuccess = (e) => {
+                const allCards = e.target.result;
+                const today = new Date().toISOString().split('T')[0];
+
+                // Filter logic: In Collection AND In Study Queue AND Due Today (or past)
+                studyQueue = allCards.filter(c => 
+                    col.card_refs.includes(c.id) && 
+                    c.status_flags.is_study_queue &&
+                    c.review_data.next_review_date <= today
+                );
+                
+                if(studyQueue.length > 0) {
+                    switchView('study-section');
+                    startSessionUI(); // Start immediately
+                } else {
+                    alert("No cards due in this collection right now!");
+                }
+            };
+        } else {
+            alert("This collection is empty.");
+        }
+    };
+};
+
+// Action: Delete Collection
+window.deleteCollection = function(colId) {
+    if(confirm("Delete this collection? (Cards will remain in database, but the list will be gone)")) {
+        const tx = db.transaction(['collections'], 'readwrite');
+        tx.objectStore('collections').delete(colId);
+        tx.oncomplete = () => {
+            renderCollectionList(); 
+            updateDashboardStats();
+        };
+    }
+};
+
+/* =========================================
+   7. IMPORT MODULE (TSV)
    ========================================= */
 
 async function handleFileSelect(event) {
@@ -255,7 +352,7 @@ async function processTSV(content, filename) {
     for (const line of lines) {
         if (!line.trim()) continue;
 
-        // Tab Separated
+        // Strict TSV Parsing
         const parts = line.split('\t');
         
         // Column Order: Target | Meta | Native | Description
@@ -266,6 +363,7 @@ async function processTSV(content, filename) {
 
         if (target) {
             // Duplicate Rule applied here via addCardToDB
+            // addToStudyQueue is TRUE for imports
             const cardId = await addCardToDB(target, native, meta, description, true);
             cardIds.push(cardId);
         }
@@ -305,7 +403,7 @@ async function processTSV(content, filename) {
 }
 
 /* =========================================
-   7. STREAM BUILDER MODULE
+   8. STREAM BUILDER MODULE
    ========================================= */
 
 // Create New Story
@@ -349,7 +447,6 @@ function loadStoryIntoStream(storyId) {
 
         // Render Segments
         for (const segment of story.segments) {
-            // Need to fetch individual card data to render bubble
             const cardReq = cardStore.get(segment.card_id);
             await new Promise(r => {
                 cardReq.onsuccess = () => {
@@ -419,7 +516,7 @@ function renderBubble(card) {
 
     div.className = `bubble ${statusClass}`;
     
-    // Promote Button
+    // Promote Button Logic
     const promoteBtn = !card.status_flags.is_study_queue 
         ? `<button class="btn-text btn-small" onclick="promoteCard('${card.id}', this)">+ Promote to Flashcard</button>` 
         : `<span style="font-size:0.8rem; color:var(--primary-color)">✓ In Deck</span>`;
@@ -433,7 +530,7 @@ function renderBubble(card) {
     container.appendChild(div);
 }
 
-// Global promote function (attached to window for inline onclick)
+// Global promote function for inline HTML access
 window.promoteCard = function(cardId, btnElement) {
     const tx = db.transaction(['cards'], 'readwrite');
     const store = tx.objectStore('cards');
@@ -441,9 +538,10 @@ window.promoteCard = function(cardId, btnElement) {
 
     req.onsuccess = () => {
         const card = req.result;
-        card.status_flags.is_study_queue = true; //
+        card.status_flags.is_study_queue = true; 
         store.put(card);
 
+        // UI Feedback
         const bubble = btnElement.closest('.bubble');
         bubble.classList.add('status-study');
         bubble.classList.remove('status-story-only');
@@ -477,9 +575,10 @@ function renderStoryList() {
 }
 
 /* =========================================
-   8. STUDY MODULE (SM-2)
+   9. STUDY MODULE (SM-2)
    ========================================= */
 
+// Prepare global session (all due cards)
 function prepareSession() {
     switchView('study-section');
     const display = document.getElementById('study-count-display');
@@ -547,7 +646,7 @@ function revealAnswer() {
     playAudio(currentCard);
 }
 
-// Audio Prioritization
+// Audio Prioritization: File -> TTS
 function playAudio(card) {
     const indicator = document.getElementById('audio-status');
     indicator.classList.add('playing');
@@ -559,7 +658,6 @@ function playAudio(card) {
     } else {
         if ('speechSynthesis' in window) {
             const utterance = new SpeechSynthesisUtterance(card.target_text);
-            // Optional: Simple lang detection or setting could go here
             speechSynthesis.speak(utterance);
             utterance.onend = () => indicator.classList.remove('playing');
         } else {
@@ -568,13 +666,13 @@ function playAudio(card) {
     }
 }
 
-// Grading Logic
+// Grading Logic (SM-2)
 window.handleGrade = function(quality) {
-    // 1. Re-queue logic
+    // 1. Re-queue logic (Fail)
     if (quality < 3) {
         studyQueue.push(currentCard);
         studyQueue.shift(); 
-        currentCard.review_data.interval = 0; // Reset interval logic for failure
+        currentCard.review_data.interval = 0; // Reset interval
         loadNextCard(); 
         return; 
     }
@@ -613,7 +711,7 @@ window.handleGrade = function(quality) {
 };
 
 /* =========================================
-   9. TEST MODULE (ARCADE)
+   10. TEST MODULE (ARCADE)
    ========================================= */
 
 const BASE_TIME_MS = 10000; 
@@ -742,25 +840,28 @@ function triggerStickyCloze() {
 }
 
 /* =========================================
-   10. INITIALISATION & LISTENERS
+   11. INITIALISATION & LISTENERS
    ========================================= */
 
 document.addEventListener('DOMContentLoaded', () => {
-    // 1. Init
+    // 1. Init Database
     initDB();
 
-    // 2. Navigation
+    // 2. Navigation Routing
     document.querySelectorAll('.nav-links a').forEach(link => {
         link.addEventListener('click', (e) => {
             e.preventDefault();
             const target = e.target.getAttribute('data-target');
-            // If switching to Read section, load list
+            
+            // Trigger Renders based on view selection
             if(target === 'read-section') renderStoryList();
+            if(target === 'collections-section') renderCollectionList();
+            
             switchView(target);
         });
     });
 
-    // 3. Settings / Data Management
+    // 3. Settings / Data Management Events
     const resetBtn = document.getElementById('btn-reset-db');
     if(resetBtn) {
         resetBtn.addEventListener('click', () => {
@@ -771,7 +872,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Export Logic
     const exportBtn = document.getElementById('btn-export-json');
     if(exportBtn) {
         exportBtn.addEventListener('click', () => {
@@ -792,10 +892,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 4. Feature Bindings
+    // 4. Import Events
     const tsvInput = document.getElementById('tsv-file-input');
     if(tsvInput) tsvInput.addEventListener('change', handleFileSelect);
 
+    // 5. Story Events
     const btnCreateStory = document.getElementById('btn-create-story');
     if(btnCreateStory) btnCreateStory.addEventListener('click', createNewStory);
 
@@ -809,7 +910,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderStoryList();
     });
 
-    // Toggles
     document.getElementById('toggle-meta').addEventListener('change', (e) => {
         document.getElementById('stream-history').classList.toggle('hide-meta', !e.target.checked);
     });
@@ -817,20 +917,38 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('stream-history').classList.toggle('hide-native', !e.target.checked);
     });
 
-    // Study & Test Bindings
+    // 6. Study Events
     document.getElementById('btn-learn-all').addEventListener('click', prepareSession);
     document.getElementById('btn-start-session').addEventListener('click', startSessionUI);
     document.getElementById('btn-show-answer').addEventListener('click', revealAnswer);
 
+    // 7. Test Events
     document.getElementById('btn-test-all').addEventListener('click', prepareTestSession);
     document.getElementById('btn-start-test').addEventListener('click', startTestUI);
     document.getElementById('btn-submit-test').addEventListener('click', handleTestSubmit);
     
-    // Enter key for Test Input
     const testInput = document.getElementById('test-input');
     if(testInput) {
         testInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') handleTestSubmit();
+        });
+    }
+    
+    // 8. Collection Manual Create
+    const btnManualCol = document.getElementById('btn-manual-collection');
+    if(btnManualCol) {
+        btnManualCol.addEventListener('click', async () => {
+            const name = prompt("Collection Name:");
+            if(name) {
+                const tx = db.transaction(['collections'], 'readwrite');
+                tx.objectStore('collections').add({
+                    id: generateId('col'),
+                    name: name,
+                    card_refs: [],
+                    created_at: new Date().toISOString()
+                });
+                tx.oncomplete = () => renderCollectionList();
+            }
         });
     }
 });
