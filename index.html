@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Clozeflash - Local-First Language Learning</title>
+    <title>Clozeflash | Local-First Language Learning</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -12,8 +12,7 @@
         <div class="logo">Clozeflash</div>
         <ul class="nav-links">
             <li><a href="#" data-target="dashboard-section" class="active">Dashboard</a></li>
-            <li><a href="#" data-target="collections-section">Collections</a></li>
-            <li><a href="#" data-target="read-section">Read</a></li>
+            <li><a href="#" data-target="read-section">Stories</a></li>
             <li><a href="#" data-target="settings-section">Settings</a></li>
         </ul>
     </nav>
@@ -31,32 +30,18 @@
                     <p id="stat-total-cards">0</p>
                 </div>
                 <div class="stat-card">
-                    <h3>Due for Review</h3>
+                    <h3>Due Today</h3>
                     <p id="stat-due-cards">0</p>
                 </div>
                 <div class="stat-card">
                     <h3>Mastered</h3>
                     <p id="stat-mastered">0</p>
                 </div>
-                <div class="stat-card">
-                    <h3>Streak</h3>
-                    <p id="stat-streak">0 Days</p>
-                </div>
             </div>
 
-            <div class="action-bar">
-                <button class="btn btn-primary" id="btn-learn-all">Learn All Cards</button>
-                <button class="btn btn-secondary" id="btn-test-all">Test All Cards</button>
-            </div>
-        </section>
-
-        <section id="collections-section" class="view hidden">
-            <header class="section-header">
-                <h1>Your Collections</h1>
-                <button class="btn btn-small" id="btn-new-collection">+ New Collection</button>
-            </header>
-            <div id="collection-list" class="card-grid">
-                <p class="empty-state">No collections found. Import data in Settings.</p>
+            <div class="action-bar" style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center;">
+                <button class="btn btn-primary btn-large" id="btn-learn-all">Learn Due Cards</button>
+                <button class="btn btn-secondary btn-large" id="btn-test-all">Arcade Test</button>
             </div>
         </section>
 
@@ -75,30 +60,32 @@
             <div id="stream-builder-view" class="hidden">
                 <header class="stream-header">
                     <button class="btn-text" id="btn-back-stories">← Back</button>
-                    <h2 id="active-story-title">Untitled Story</h2>
+                    <h2 id="active-story-title" style="margin: 0 1rem; font-size: 1.1rem;">Untitled Story</h2>
                     <div class="toggles">
-                        <label><input type="checkbox" id="toggle-meta" checked> Meta</label>
+                        <label style="margin-right: 0.5rem;"><input type="checkbox" id="toggle-meta" checked> Meta</label>
                         <label><input type="checkbox" id="toggle-native" checked> Native</label>
                     </div>
                 </header>
 
-                <div id="stream-history"></div>
+                <div id="stream-history">
+                    </div>
 
                 <div class="input-dock">
                     <div class="dock-inputs">
-                        <input type="text" id="dock-target" placeholder="Target Language Sentence (Required)">
-                        <input type="text" id="dock-meta" placeholder="Meta / Pinyin">
-                        <input type="text" id="dock-native" placeholder="Native Translation">
+                        <input type="text" id="dock-target" placeholder="Target Language Sentence (Required)" autocomplete="off">
+                        <input type="text" id="dock-meta" placeholder="Meta / Pinyin / Romaji" autocomplete="off">
+                        <input type="text" id="dock-native" placeholder="Native Translation" autocomplete="off">
                     </div>
-                    <button class="btn btn-primary" id="btn-dock-submit">Add</button>
+                    <button class="btn btn-primary" id="btn-dock-submit" style="align-self: flex-end;">Add</button>
                 </div>
             </div>
         </section>
 
         <section id="study-section" class="view hidden">
+            
             <div id="study-setup" class="center-container">
-                <div class="stat-card" style="max-width: 400px; margin: 0 auto;">
-                    <h2>Ready to Learn?</h2>
+                <div class="stat-card" style="max-width: 400px; margin: 0 auto; text-align: center;">
+                    <h2>Review Session</h2>
                     <p id="study-count-display" style="font-size: 1.2rem; margin: 1rem 0;">Checking for cards...</p>
                     <button class="btn btn-primary btn-large" id="btn-start-session" disabled>Start Session</button>
                 </div>
@@ -107,15 +94,16 @@
             <div id="study-active" class="hidden">
                 <header class="section-header">
                     <button class="btn-text" onclick="location.reload()">Exit</button>
-                    <span><span id="queue-counter">0</span> remaining</span>
+                    <span><span id="queue-counter">0</span> cards remaining</span>
                 </header>
 
                 <div class="flashcard-container">
                     <div class="flashcard-front">
                         <h1 id="card-target">Target Text</h1>
                     </div>
+
                     <div id="card-back" class="flashcard-back hidden">
-                        <hr>
+                        <hr style="border: 0; border-top: 1px solid #eee; margin: 1rem 0;">
                         <p id="card-meta" class="meta-text">Meta Info</p>
                         <h2 id="card-native">Native Translation</h2>
                         <p id="card-desc" class="desc-text">Description</p>
@@ -125,7 +113,8 @@
 
                 <div class="study-controls">
                     <button class="btn btn-primary btn-wide" id="btn-show-answer">Show Answer</button>
-                    <div id="grading-buttons" class="hidden grid-4">
+
+                    <div id="grading-buttons" class="hidden grid-4" style="margin-top: 1rem;">
                         <button class="btn btn-danger" onclick="handleGrade(1)">Again</button>
                         <button class="btn btn-warning" onclick="handleGrade(3)">Hard</button>
                         <button class="btn btn-success" onclick="handleGrade(4)">Good</button>
@@ -136,12 +125,13 @@
         </section>
 
         <section id="test-section" class="view hidden">
+            
             <div id="test-setup" class="center-container">
-                <div class="stat-card" style="max-width: 400px; margin: 0 auto;">
+                <div class="stat-card" style="max-width: 400px; margin: 0 auto; text-align: center;">
                     <h2>Arcade Speed Test</h2>
-                    <p>Type the answer before time runs out!</p>
+                    <p>Type the answer before the timer runs out!</p>
                     <p class="text-muted">Time decreases every round.</p>
-                    <button class="btn btn-secondary btn-large" id="btn-start-test">Start Arcade</button>
+                    <button class="btn btn-secondary btn-large" id="btn-start-test" style="margin-top: 1rem;">Start Arcade</button>
                 </div>
             </div>
 
@@ -160,13 +150,15 @@
                         <h2 id="test-native">Native Text</h2>
                         <p id="test-meta" class="meta-text">Meta Hint</p>
                     </div>
+
                     <div class="test-input-area">
                         <input type="text" id="test-input" placeholder="Type the Target Language..." autocomplete="off">
-                        <button class="btn btn-primary" id="btn-submit-test">Submit</button>
+                        <button class="btn btn-primary" id="btn-submit-test" style="width: 100%; margin-top: 0.5rem;">Submit</button>
                     </div>
-                    <div id="sticky-cloze-area" class="hidden">
-                        <p class="text-danger">Incorrect! Type the answer exactly to continue:</p>
-                        <h3 id="test-correct-answer" class="text-primary">Target Text</h3>
+                    
+                    <div id="sticky-cloze-area" class="hidden" style="margin-top: 1rem; text-align: center;">
+                        <p class="text-danger" style="font-weight: bold;">Incorrect!</p>
+                        <p>Type exactly: <span id="test-correct-answer" class="text-primary" style="font-weight: bold;"></span></p>
                     </div>
                 </div>
             </div>
@@ -176,15 +168,21 @@
             <header class="section-header">
                 <h1>Settings</h1>
             </header>
+            
             <div class="settings-group">
                 <h3>Data Management</h3>
-                <button class="btn btn-danger" id="btn-reset-db">Reset Database (Wipe Data)</button>
+                <p class="text-muted" style="margin-bottom: 1rem;">Your data is stored locally in your browser.</p>
+                
+                <button class="btn" id="btn-export-json">Download Backup (JSON)</button>
+                <button class="btn btn-danger" id="btn-reset-db">Reset Database (Wipe All)</button>
             </div>
 
             <div class="import-area">
-                <h3>Import Collection (TSV)</h3>
+                <h3>Import Cards (TSV)</h3>
                 <p class="text-muted">Format: Target | Meta | Native | Description</p>
-                <input type="file" id="tsv-file-input" accept=".tsv,.txt,.csv">
+                
+                <input type="file" id="tsv-file-input" accept=".tsv,.txt,.csv" style="margin-top: 1rem;">
+                
                 <div id="progress-container" class="hidden">
                     <div class="progress-bar-bg">
                         <div id="progress-fill" style="width: 0%"></div>
