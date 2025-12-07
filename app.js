@@ -1,8 +1,6 @@
 /**
  * CLOZEFLASH - Local-First Language Learning Application
- * * Architecture: Single Page Application (SPA) using IndexedDB for local storage.
- * Logic: Relational Schema (Single Source of Truth), SM-2 Algorithm, Arcade Timer decay.
- * * Author: Gemini (Ref: User Specs)
+ * Cleaned App Logic
  */
 
 /* =========================================
@@ -38,21 +36,21 @@ function initDB() {
         request.onupgradeneeded = (event) => {
             db = event.target.result;
 
-            [cite_start]// Store 1: Cards (The Single Source of Truth) [cite: 162]
+            // Store 1: Cards (The Single Source of Truth)
             if (!db.objectStoreNames.contains('cards')) {
                 const cardStore = db.createObjectStore('cards', { keyPath: 'id' });
-                [cite_start]// Index for duplicate checking [cite: 165]
+                // Index for duplicate checking
                 cardStore.createIndex('target_text', 'target_text', { unique: false }); 
                 // Index for study queries
                 cardStore.createIndex('next_review', 'review_data.next_review_date', { unique: false });
             }
 
-            [cite_start]// Store 2: Collections [cite: 163]
+            // Store 2: Collections
             if (!db.objectStoreNames.contains('collections')) {
                 db.createObjectStore('collections', { keyPath: 'id' });
             }
 
-            [cite_start]// Store 3: Storyblocks [cite: 163]
+            // Store 3: Storyblocks
             if (!db.objectStoreNames.contains('storyblocks')) {
                 db.createObjectStore('storyblocks', { keyPath: 'id' });
             }
@@ -99,7 +97,7 @@ function switchView(targetId) {
     }
 }
 
-[cite_start]// Fisher-Yates Shuffle [cite: 259]
+// Fisher-Yates Shuffle
 function fisherYatesShuffle(array) {
     let currentIndex = array.length, randomIndex;
     while (currentIndex != 0) {
@@ -110,7 +108,7 @@ function fisherYatesShuffle(array) {
     return array;
 }
 
-[cite_start]// SM-2 Algorithm Implementation [cite: 256]
+// SM-2 Algorithm Implementation
 function calculateSM2(quality, previousInterval, previousRepetitions, previousEaseFactor) {
     let interval, repetitions, easeFactor;
 
@@ -139,7 +137,7 @@ function calculateSM2(quality, previousInterval, previousRepetitions, previousEa
    ========================================= */
 
 /**
- * [cite_start]Adds a card or returns existing ID (Duplicate Rule). [cite: 164-172]
+ * Adds a card or returns existing ID (Duplicate Rule).
  * @param {string} target - Target language text
  * @param {string} native - Native translation
  * @param {string} meta - Pinyin/Romaji etc
@@ -257,17 +255,17 @@ async function processTSV(content, filename) {
     for (const line of lines) {
         if (!line.trim()) continue;
 
-        [cite_start]// [cite: 222] Tab Separated
+        // Tab Separated
         const parts = line.split('\t');
         
-        [cite_start]// [cite: 224] Column Order: Target | Meta | Native | Description
+        // Column Order: Target | Meta | Native | Description
         const target = parts[0] ? parts[0].trim() : "";
         const meta = parts[1] ? parts[1].trim() : "";
         const native = parts[2] ? parts[2].trim() : "";
         const description = parts[3] ? parts[3].trim() : "";
 
         if (target) {
-            [cite_start]// [cite: 164] Duplicate Rule applied here via addCardToDB
+            // Duplicate Rule applied here via addCardToDB
             const cardId = await addCardToDB(target, native, meta, description, true);
             cardIds.push(cardId);
         }
@@ -286,7 +284,7 @@ async function processTSV(content, filename) {
     if (cardIds.length > 0) {
         const collectionName = prompt("Import complete! Name this collection:", filename.split('.')[0]);
         if (collectionName) {
-            [cite_start]// Create Collection Reference [cite: 163]
+            // Create Collection Reference
             const tx = db.transaction(['collections'], 'readwrite');
             tx.objectStore('collections').add({
                 id: generateId('col'),
@@ -373,7 +371,7 @@ async function handleDockSubmit() {
 
     if (!target) return;
 
-    [cite_start]// [cite: 238] is_study_queue = FALSE for Stream Builder
+    // is_study_queue = FALSE for Stream Builder
     const cardId = await addCardToDB(
         target, 
         nativeInput.value.trim(), 
@@ -421,7 +419,7 @@ function renderBubble(card) {
 
     div.className = `bubble ${statusClass}`;
     
-    [cite_start]// Promote Button [cite: 241]
+    // Promote Button
     const promoteBtn = !card.status_flags.is_study_queue 
         ? `<button class="btn-text btn-small" onclick="promoteCard('${card.id}', this)">+ Promote to Flashcard</button>` 
         : `<span style="font-size:0.8rem; color:var(--primary-color)">✓ In Deck</span>`;
@@ -443,7 +441,7 @@ window.promoteCard = function(cardId, btnElement) {
 
     req.onsuccess = () => {
         const card = req.result;
-        card.status_flags.is_study_queue = true; [cite_start]// [cite: 243]
+        card.status_flags.is_study_queue = true; //
         store.put(card);
 
         const bubble = btnElement.closest('.bubble');
@@ -549,7 +547,7 @@ function revealAnswer() {
     playAudio(currentCard);
 }
 
-[cite_start]// [cite: 247-249] Audio Prioritization
+// Audio Prioritization
 function playAudio(card) {
     const indicator = document.getElementById('audio-status');
     indicator.classList.add('playing');
@@ -572,7 +570,7 @@ function playAudio(card) {
 
 // Grading Logic
 window.handleGrade = function(quality) {
-    [cite_start]// 1. Re-queue logic [cite: 42]
+    // 1. Re-queue logic
     if (quality < 3) {
         studyQueue.push(currentCard);
         studyQueue.shift(); 
@@ -599,7 +597,7 @@ window.handleGrade = function(quality) {
     nextDate.setDate(nextDate.getDate() + result.interval);
     currentCard.review_data.next_review_date = nextDate.toISOString().split('T')[0];
 
-    [cite_start]// Check Mastery [cite: 23]
+    // Check Mastery
     currentCard.status_flags.consecutive_correct = 
         quality >= 3 ? currentCard.status_flags.consecutive_correct + 1 : 0;
     
@@ -673,7 +671,7 @@ function nextTestRound() {
     
     document.getElementById('sticky-cloze-area').classList.add('hidden');
 
-    [cite_start]// [cite: 257] Decay Timer
+    // Decay Timer
     const duration = BASE_TIME_MS * Math.pow(DECAY_FACTOR, testRound);
     startTimer(duration);
 }
@@ -694,7 +692,7 @@ function startTimer(durationMs) {
 
         if (remaining <= 0) {
             clearInterval(testTimer);
-            [cite_start]triggerStickyCloze(); // [cite: 58] Sticky Cloze on Timeout
+            triggerStickyCloze(); // Sticky Cloze on Timeout
         }
     }, interval);
 }
@@ -773,7 +771,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    [cite_start]// Export Logic [cite: 274]
+    // Export Logic
     const exportBtn = document.getElementById('btn-export-json');
     if(exportBtn) {
         exportBtn.addEventListener('click', () => {
